@@ -35,7 +35,9 @@ QString htmlText(const QString &value) {
   auto cleaned = value;
   cleaned.remove(rx(QStringLiteral("<script\\b[^>]*>.*?</script>")));
   cleaned.remove(rx(QStringLiteral("<style\\b[^>]*>.*?</style>")));
-  return QTextDocumentFragment::fromHtml(cleaned).toPlainText().simplified();
+  auto plain = QTextDocumentFragment::fromHtml(cleaned).toPlainText();
+  plain.remove(QChar(0xfffc));
+  return plain.simplified();
 }
 
 QString capture(const QString &value, const QString &pattern, int group = 1) {
