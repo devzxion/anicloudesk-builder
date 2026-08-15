@@ -145,11 +145,11 @@ jobs:
       - name: Install Windows deployable tree
         if: matrix.platform == 'windows'
         shell: pwsh
-        run: cmake --install desktop-app/out/release --prefix desktop-app/out/stage
+        run: cmake --install desktop-app/out/release --prefix "$env:GITHUB_WORKSPACE/desktop-app/out/stage"
       - name: Install Unix deployable tree
         if: matrix.platform != 'windows'
         shell: bash
-        run: cmake --install desktop-app/out/release --prefix desktop-app/out/stage
+        run: cmake --install desktop-app/out/release --prefix "$GITHUB_WORKSPACE/desktop-app/out/stage"
       - name: Smoke test Windows app
         if: matrix.platform == 'windows'
         shell: pwsh
