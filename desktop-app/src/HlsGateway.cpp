@@ -167,7 +167,7 @@ void HlsGateway::proxyResolved(QTcpSocket *socket, const QByteArray &method, con
   if (incomingHeaders.contains(QByteArrayLiteral("range"))) request.setRawHeader(QByteArrayLiteral("Range"), incomingHeaders.value(QByteArrayLiteral("range")));
   auto *reply = method == QByteArrayLiteral("HEAD") ? m_network.head(request) : m_network.get(request);
   connect(socket, &QTcpSocket::disconnected, reply, &QNetworkReply::abort);
-  connect(reply, &QNetworkReply::finished, this, [this, reply, socket, method, token, upstream] {
+  connect(reply, &QNetworkReply::finished, this, [this, reply, socket, method, token, upstream, resourceId] {
     if (socket->state() == QAbstractSocket::UnconnectedState) { reply->deleteLater(); return; }
     const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     if (reply->error() != QNetworkReply::NoError || status < 200 || status >= 400) {
