@@ -189,6 +189,25 @@ jobs:
           if (-not $makensis) { throw 'NSIS compiler was not found after installation' }
           & $makensis "/DSTAGE_DIR=$stage" "/DICON_FILE=$icon" "/DOUTPUT_FILE=$output" desktop-app\packaging\windows\installer.nsi
           Compress-Archive -Path desktop-app\out\stage\* -DestinationPath "desktop-app\out\artifacts\AniCloud-$env:VERSION-windows-x64-portable.zip"
+      - name: Smoke test installed Windows package
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          $installer = (Resolve-Path "desktop-app\out\artifacts\AniCloud-Setup-$env:VERSION-windows-x64.exe").Path
+          $installRoot = Join-Path $env:RUNNER_TEMP 'AniCloudInstalled'
+          $install = Start-Process -FilePath $installer -ArgumentList @('/S', "/D=$installRoot") -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "AniCloud installer exited with $($install.ExitCode)" }
+          $launcher = Join-Path $installRoot 'AniCloud.exe'
+          $application = Join-Path $installRoot 'bin\AniCloud.exe'
+          if (-not (Test-Path -LiteralPath $launcher)) { throw 'Installed native launcher is missing' }
+          if (-not (Test-Path -LiteralPath $application)) { throw 'Installed native application is missing' }
+          & $launcher --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw "Installed AniCloud smoke test exited with $LASTEXITCODE" }
+          $uninstaller = Join-Path $installRoot 'Uninstall AniCloud.exe'
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "AniCloud uninstaller exited with $($uninstall.ExitCode)" }
 
       - name: Package Linux assets
         if: matrix.platform == 'linux'

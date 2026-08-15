@@ -156,6 +156,13 @@ set_target_properties(AniCloud PROPERTIES
 
 if(WIN32)
   target_sources(AniCloud PRIVATE resources/windows.rc)
+  add_executable(AniCloudLauncher WIN32 src/windows_launcher.cpp resources/windows.rc)
+  set_target_properties(AniCloudLauncher PROPERTIES
+    OUTPUT_NAME "AniCloud"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/launcher"
+  )
+  target_link_libraries(AniCloudLauncher PRIVATE shell32 user32)
+  install(TARGETS AniCloudLauncher RUNTIME DESTINATION .)
 elseif(APPLE)
   set_source_files_properties(resources/icon.png PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
   target_sources(AniCloud PRIVATE resources/icon.png)

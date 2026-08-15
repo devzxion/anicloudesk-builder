@@ -23,6 +23,7 @@ SetCompressor /SOLID lzma
 !insertmacro MUI_LANGUAGE "English"
 
 Section "AniCloud" SEC_MAIN
+  SetShellVarContext all
   ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_ID}" "UninstallString"
   StrCmp $0 "" check_default_install
   ExecWait '$0 /S'
@@ -42,13 +43,14 @@ legacy_removed:
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_ID}" "UninstallString" '"$INSTDIR\Uninstall AniCloud.exe"'
   WriteRegStr HKCR "anicloud" "" "URL:AniCloud Protocol"
   WriteRegStr HKCR "anicloud" "URL Protocol" ""
-  WriteRegStr HKCR "anicloud\shell\open\command" "" '"$INSTDIR\bin\AniCloud.exe" "%1"'
+  WriteRegStr HKCR "anicloud\shell\open\command" "" '"$INSTDIR\AniCloud.exe" "%1"'
   CreateDirectory "$SMPROGRAMS\AniCloud"
-  CreateShortcut "$SMPROGRAMS\AniCloud\AniCloud.lnk" "$INSTDIR\bin\AniCloud.exe"
-  CreateShortcut "$DESKTOP\AniCloud.lnk" "$INSTDIR\bin\AniCloud.exe"
+  CreateShortcut "$SMPROGRAMS\AniCloud\AniCloud.lnk" "$INSTDIR\AniCloud.exe" "" "$INSTDIR\AniCloud.exe"
+  CreateShortcut "$DESKTOP\AniCloud.lnk" "$INSTDIR\AniCloud.exe" "" "$INSTDIR\AniCloud.exe"
 SectionEnd
 
 Section "Uninstall"
+  SetShellVarContext all
   Delete "$DESKTOP\AniCloud.lnk"
   Delete "$SMPROGRAMS\AniCloud\AniCloud.lnk"
   RMDir "$SMPROGRAMS\AniCloud"
