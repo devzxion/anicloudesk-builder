@@ -27,7 +27,8 @@ private slots:
     QCOMPARE(mapped.first().toMap().value(QStringLiteral("animeId")).toString(), QStringLiteral("anime"));
     QCOMPARE(mapped.first().toMap().value(QStringLiteral("number")).toInt(), 13);
 
-    const auto legacy = ProviderClient::episodeList(QJsonArray{QJsonArray{14, QStringLiteral("anime-episode-14")}}, QStringLiteral("anime"));
+    const QJsonArray legacyPayload{QJsonValue(QJsonArray{14, QStringLiteral("anime-episode-14")})};
+    const auto legacy = ProviderClient::episodeList(legacyPayload, QStringLiteral("anime"));
     QCOMPARE(legacy.size(), 1);
     QCOMPARE(legacy.first().toMap().value(QStringLiteral("id")).toString(), QStringLiteral("anime-episode-14"));
     QCOMPARE(legacy.first().toMap().value(QStringLiteral("number")).toInt(), 14);
