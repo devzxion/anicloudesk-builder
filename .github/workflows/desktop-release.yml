@@ -98,6 +98,11 @@ jobs:
           version: ${{ env.QT_VERSION }}
           modules: qtmultimedia qtshadertools
           cache: true
+      - name: Activate MSVC 2022 x64 environment
+        if: matrix.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
       - name: Install Windows packager
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -109,19 +114,40 @@ jobs:
           git clone https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
           git -C "$VCPKG_ROOT" checkout e55144c5a465b53bc71bd0b59111ea0b8bb039a5
           if [[ "$RUNNER_OS" == "Windows" ]]; then "$VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics; else "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics; fi
-      - name: Configure
+      - name: Configure Windows build with MSVC
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          cmake -S desktop-app -B desktop-app/out/release -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            "-DANICLOUD_UPDATE_PUBLIC_KEY_HEX=${{ needs.verify.outputs.update_public_key }}"
+      - name: Configure Unix build
+        if: matrix.platform != 'windows'
         shell: bash
         run: >-
           cmake -S desktop-app -B desktop-app/out/release -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
           -DANICLOUD_UPDATE_PUBLIC_KEY_HEX=${{ needs.verify.outputs.update_public_key }}
-      - name: Build and test
+      - name: Build and test on Windows
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          cmake --build desktop-app/out/release --parallel
+          ctest --test-dir desktop-app/out/release --output-on-failure
+      - name: Build and test on Unix
+        if: matrix.platform != 'windows'
         shell: bash
         run: |
           cmake --build desktop-app/out/release --parallel
           ctest --test-dir desktop-app/out/release --output-on-failure
-      - name: Install deployable tree
+      - name: Install Windows deployable tree
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: cmake --install desktop-app/out/release --prefix desktop-app/out/stage
+      - name: Install Unix deployable tree
+        if: matrix.platform != 'windows'
         shell: bash
         run: cmake --install desktop-app/out/release --prefix desktop-app/out/stage
       - name: Smoke test Windows app

@@ -159,6 +159,8 @@ if(WIN32)
 elseif(APPLE)
   set_source_files_properties(resources/icon.png PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
   target_sources(AniCloud PRIVATE resources/icon.png)
+else()
+  set_target_properties(AniCloud PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 endif()
 
 install(TARGETS AniCloud
