@@ -38,7 +38,12 @@ ApplicationWindow {
             Text { text: "NATIVE"; color: Theme.muted; font.pixelSize: 9; Layout.fillWidth: true }
             Button { text: "—"; implicitWidth: 46; implicitHeight: 42; flat: true; palette.buttonText: Theme.text; Accessible.name: "Minimize"; onClicked: window.showMinimized() }
             Button { text: window.visibility === Window.Maximized ? "❐" : "□"; implicitWidth: 46; implicitHeight: 42; flat: true; palette.buttonText: Theme.text; Accessible.name: "Maximize"; onClicked: window.visibility === Window.Maximized ? window.showNormal() : window.showMaximized() }
-            Button { text: "×"; implicitWidth: 46; implicitHeight: 42; flat: true; palette.buttonText: Theme.text; Accessible.name: "Close"; background: Rectangle { color: parent.hovered ? Theme.red : "transparent" }; onClicked: window.close() }
+            Button {
+                text: "×"; implicitWidth: 46; implicitHeight: 42; flat: true
+                palette.buttonText: Theme.text; Accessible.name: "Close"
+                background: Rectangle { color: parent.hovered ? Theme.red : "transparent" }
+                onClicked: window.close()
+            }
         }
         DragHandler { onActiveChanged: if (active) window.startSystemMove() }
         TapHandler { acceptedButtons: Qt.LeftButton; onDoubleTapped: window.visibility === Window.Maximized ? window.showNormal() : window.showMaximized() }

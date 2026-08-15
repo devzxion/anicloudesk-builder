@@ -18,7 +18,15 @@ Item {
             TextField { id: nameField; visible: root.mode === "register"; placeholderText: "Name"; color: Theme.text; Layout.fillWidth: true; Accessible.name: "Name"; background: Rectangle { color: Theme.raised; radius: Theme.radius; border.color: nameField.activeFocus ? Theme.red : Theme.border } }
             TextField { id: emailField; visible: ["login", "register", "forgot"].indexOf(root.mode) >= 0; placeholderText: "Email"; color: Theme.text; Layout.fillWidth: true; inputMethodHints: Qt.ImhEmailCharactersOnly; Accessible.name: "Email"; background: Rectangle { color: Theme.raised; radius: Theme.radius; border.color: emailField.activeFocus ? Theme.red : Theme.border } }
             TextField { id: otpField; visible: root.mode === "verify" || root.mode === "reset"; placeholderText: "6-digit code"; color: Theme.text; Layout.fillWidth: true; inputMethodHints: Qt.ImhDigitsOnly; maximumLength: 8; Accessible.name: "Verification code"; background: Rectangle { color: Theme.raised; radius: Theme.radius; border.color: otpField.activeFocus ? Theme.red : Theme.border } }
-            TextField { id: passwordField; visible: root.mode === "login" || root.mode === "register" || root.mode === "reset"; placeholderText: root.mode === "reset" ? "New password" : "Password"; color: Theme.text; Layout.fillWidth: true; echoMode: TextInput.Password; Accessible.name: placeholderText; background: Rectangle { color: Theme.raised; radius: Theme.radius; border.color: passwordField.activeFocus ? Theme.red : Theme.border }; onAccepted: root.submit() }
+            TextField {
+                id: passwordField
+                visible: root.mode === "login" || root.mode === "register" || root.mode === "reset"
+                placeholderText: root.mode === "reset" ? "New password" : "Password"
+                color: Theme.text; Layout.fillWidth: true; echoMode: TextInput.Password
+                Accessible.name: placeholderText
+                background: Rectangle { color: Theme.raised; radius: Theme.radius; border.color: passwordField.activeFocus ? Theme.red : Theme.border }
+                onAccepted: root.submit()
+            }
             AppButton { Layout.fillWidth: true; text: Account.busy ? "Please wait…" : root.mode === "login" ? "Sign in" : root.mode === "register" ? "Register" : root.mode === "verify" ? "Verify" : root.mode === "forgot" ? "Send reset code" : "Reset password"; enabled: !Account.busy; onClicked: root.submit() }
             RowLayout {
                 Layout.fillWidth: true
