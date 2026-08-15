@@ -164,7 +164,7 @@ void PlayerController::pause() { m_restorePlaying = false; m_player.pause(); }
 void PlayerController::togglePlayback() { playing() ? pause() : play(); }
 void PlayerController::seek(qint64 milliseconds) { m_player.setPosition(qBound<qint64>(0, milliseconds, duration())); }
 void PlayerController::seekBy(qint64 deltaMilliseconds) { seek(position() + deltaMilliseconds); }
-void PlayerController::setVolume(double volume) { const auto value = qBound(0.0, volume, 1.0); if (qFuzzyCompare(m_audio.volume(), value)) return; m_audio.setVolume(value); emit volumeChanged(); }
+void PlayerController::setVolume(double volume) { const float value = qBound(0.0f, static_cast<float>(volume), 1.0f); if (qFuzzyCompare(m_audio.volume(), value)) return; m_audio.setVolume(value); emit volumeChanged(); }
 void PlayerController::adjustVolume(double delta) { setVolume(volume() + delta); }
 void PlayerController::setSpeed(double speed) { m_player.setPlaybackRate(qBound(0.25, speed, 3.0)); }
 void PlayerController::setQuality(const QString &quality) {
