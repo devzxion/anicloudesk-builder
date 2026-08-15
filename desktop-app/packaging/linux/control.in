@@ -1,0 +1,9 @@
+Package: anicloud
+Version: @PROJECT_VERSION@
+Section: video
+Priority: optional
+Architecture: amd64
+Maintainer: AniCloud <support@anicloud.ink>
+Depends: libc6 (>= 2.35), libstdc++6, libgl1, libx11-6, libxcb1, libxkbcommon-x11-0, libsecret-1-0
+Description: AniCloud native desktop streaming client
+ A native Qt Quick anime streaming application with offline playback support.

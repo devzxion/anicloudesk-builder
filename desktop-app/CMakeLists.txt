@@ -207,6 +207,7 @@ elseif(UNIX)
   set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
   set(CPACK_DEBIAN_PACKAGE_SECTION "video")
   set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+  configure_file(packaging/linux/control.in ${CMAKE_CURRENT_BINARY_DIR}/debian-control @ONLY)
 endif()
 include(CPack)
 

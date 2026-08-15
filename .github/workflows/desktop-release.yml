@@ -206,10 +206,13 @@ jobs:
           curl -fL -o desktop-app/out/appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x desktop-app/out/appimagetool desktop-app/out/AppDir/AppRun
           ARCH=x86_64 desktop-app/out/appimagetool desktop-app/out/AppDir "desktop-app/out/artifacts/AniCloud-${VERSION}-linux-x64.AppImage"
-          cpack --config desktop-app/out/release/CPackConfig.cmake -G DEB -B desktop-app/out/cpack
-          deb="$(find desktop-app/out/cpack -maxdepth 1 -name '*.deb' -print -quit)"
-          test -n "$deb"
-          mv "$deb" "desktop-app/out/artifacts/AniCloud-${VERSION}-linux-x64.deb"
+          mkdir -p desktop-app/out/debroot/DEBIAN desktop-app/out/debroot/opt/anicloud desktop-app/out/debroot/usr/bin desktop-app/out/debroot/usr/share/applications desktop-app/out/debroot/usr/share/icons/hicolor/256x256/apps
+          cp -a desktop-app/out/stage/. desktop-app/out/debroot/opt/anicloud/
+          cp desktop-app/out/release/debian-control desktop-app/out/debroot/DEBIAN/control
+          cp desktop-app/resources/linux/ink.anicloud.desktop.desktop desktop-app/out/debroot/usr/share/applications/ink.anicloud.desktop.desktop
+          cp desktop-app/resources/icon.png desktop-app/out/debroot/usr/share/icons/hicolor/256x256/apps/ink.anicloud.desktop.png
+          ln -s /opt/anicloud/bin/AniCloud desktop-app/out/debroot/usr/bin/AniCloud
+          dpkg-deb --build --root-owner-group desktop-app/out/debroot "desktop-app/out/artifacts/AniCloud-${VERSION}-linux-x64.deb"
           xvfb-run -a "desktop-app/out/artifacts/AniCloud-${VERSION}-linux-x64.AppImage" --appimage-extract-and-run --smoke-test
 
       - name: Ad-hoc sign and package macOS DMG
