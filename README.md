@@ -4,11 +4,11 @@ This private repository is the isolated build source for AniCloud Native Desktop
 
 Production tag `desktop-v4.0.0` builds and publishes:
 
-- Windows x64: signed NSIS installer and portable ZIP
-- macOS 13+: signed and notarized x64 and arm64 DMGs
+- Windows x64: unsigned NSIS installer and portable ZIP
+- macOS 13+: ad-hoc-signed, unnotarized x64 and arm64 DMGs
 - Ubuntu 22.04-class Linux x64: AppImage and DEB
 - Detached Ed25519-signed release manifest and SHA-256 checksums
 
 Build requirements and local commands are documented in [desktop-app/README.md](desktop-app/README.md). Signing and release secrets are documented in [desktop-app/RELEASING.md](desktop-app/RELEASING.md).
 
-The production workflow intentionally fails when any required Windows, Apple, or manifest-signing credential is unavailable.
+The production workflow requires only the Ed25519 manifest-signing key and the cross-repository release token. Windows and macOS packages intentionally have no trusted publisher signature.

@@ -106,24 +106,6 @@ jobs:
           git clone https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
           git -C "$VCPKG_ROOT" checkout e55144c5a465b53bc71bd0b59111ea0b8bb039a5
           if [[ "$RUNNER_OS" == "Windows" ]]; then "$VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics; else "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics; fi
-      - name: Require Windows signing credentials
-        if: matrix.platform == 'windows'
-        shell: bash
-        env:
-          CERT: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-          PASS: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: test -n "$CERT" && test -n "$PASS"
-      - name: Require Apple signing and notarization credentials
-        if: matrix.platform == 'macos'
-        shell: bash
-        env:
-          CERT: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
-          PASS: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          TEAM: ${{ secrets.APPLE_TEAM_ID }}
-          APP_PASS: ${{ secrets.APPLE_APP_PASSWORD }}
-        run: test -n "$CERT" && test -n "$PASS" && test -n "$IDENTITY" && test -n "$APPLE_ID" && test -n "$TEAM" && test -n "$APP_PASS"
       - name: Configure
         shell: bash
         run: >-
@@ -153,22 +135,11 @@ jobs:
         shell: bash
         run: python desktop-app/scripts/check_package_policy.py desktop-app/out/stage
 
-      - name: Import Windows certificate and sign executable
-        if: matrix.platform == 'windows'
-        shell: pwsh
-        env:
-          CERT: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-          PASS: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: |
-          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\anicloud.pfx", [Convert]::FromBase64String($env:CERT))
-          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Filter signtool.exe -Recurse | Sort-Object FullName -Descending | Select-Object -First 1).FullName
-          & $signtool sign /fd SHA256 /f "$env:RUNNER_TEMP\anicloud.pfx" /p $env:PASS /tr http://timestamp.digicert.com /td SHA256 desktop-app\out\stage\bin\AniCloud.exe
-      - name: Package and sign Windows assets
+      - name: Package unsigned Windows assets
         if: matrix.platform == 'windows'
         shell: pwsh
         env:
           VERSION: ${{ needs.verify.outputs.version }}
-          PASS: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
           New-Item -ItemType Directory -Force desktop-app\out\artifacts | Out-Null
           $stage = (Resolve-Path desktop-app\out\stage).Path
@@ -176,8 +147,6 @@ jobs:
           $output = (Resolve-Path desktop-app\out\artifacts).Path + "\AniCloud-Setup-$env:VERSION-windows-x64.exe"
           & makensis.exe "/DSTAGE_DIR=$stage" "/DICON_FILE=$icon" "/DOUTPUT_FILE=$output" desktop-app\packaging\windows\installer.nsi
           Compress-Archive -Path desktop-app\out\stage\* -DestinationPath "desktop-app\out\artifacts\AniCloud-$env:VERSION-windows-x64-portable.zip"
-          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Filter signtool.exe -Recurse | Sort-Object FullName -Descending | Select-Object -First 1).FullName
-          & $signtool sign /fd SHA256 /f "$env:RUNNER_TEMP\anicloud.pfx" /p $env:PASS /tr http://timestamp.digicert.com /td SHA256 $output
 
       - name: Package Linux assets
         if: matrix.platform == 'linux'
@@ -201,43 +170,21 @@ jobs:
           mv "$deb" "desktop-app/out/artifacts/AniCloud-${VERSION}-linux-x64.deb"
           xvfb-run -a "desktop-app/out/artifacts/AniCloud-${VERSION}-linux-x64.AppImage" --appimage-extract-and-run --smoke-test
 
-      - name: Import Apple Developer ID certificate
-        if: matrix.platform == 'macos'
-        env:
-          CERT: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
-          PASS: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: |
-          set -euo pipefail
-          keychain="$RUNNER_TEMP/anicloud.keychain-db"
-          echo "$CERT" | base64 -D > "$RUNNER_TEMP/anicloud.p12"
-          security create-keychain -p actions "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p actions "$keychain"
-          security import "$RUNNER_TEMP/anicloud.p12" -P "$PASS" -A -t cert -f pkcs12 -k "$keychain"
-          security list-keychains -d user -s "$keychain"
-          security set-key-partition-list -S apple-tool:,apple: -s -k actions "$keychain"
-      - name: Sign, notarize and staple macOS DMG
+      - name: Ad-hoc sign and package macOS DMG
         if: matrix.platform == 'macos'
         env:
           VERSION: ${{ needs.verify.outputs.version }}
           ARCHITECTURE: ${{ matrix.architecture }}
-          IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          TEAM: ${{ secrets.APPLE_TEAM_ID }}
-          APP_PASS: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           set -euo pipefail
           app="desktop-app/out/stage/AniCloud.app"
-          codesign --force --deep --options runtime --timestamp --sign "$IDENTITY" "$app"
+          codesign --force --deep --sign - "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
           mkdir -p desktop-app/out/artifacts desktop-app/out/dmg
           cp -a "$app" desktop-app/out/dmg/
           ln -s /Applications desktop-app/out/dmg/Applications
           dmg="desktop-app/out/artifacts/AniCloud-${VERSION}-macos-${ARCHITECTURE}.dmg"
           hdiutil create -volname AniCloud -srcfolder desktop-app/out/dmg -ov -format UDZO "$dmg"
-          codesign --force --timestamp --sign "$IDENTITY" "$dmg"
-          xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --team-id "$TEAM" --password "$APP_PASS" --wait
-          xcrun stapler staple "$dmg"
           mount_point="$RUNNER_TEMP/anicloud-dmg"
           mkdir -p "$mount_point"
           hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_point"
@@ -298,6 +245,10 @@ jobs:
         with:
           tag_name: ${{ needs.verify.outputs.tag }}
           name: AniCloud Native Desktop ${{ needs.verify.outputs.version }}
+          body: |
+            Native AniCloud desktop release for Windows, macOS, and Linux.
+
+            Windows and macOS packages are intentionally distributed without a trusted publisher certificate. The operating system may display an Unknown Publisher or unidentified developer warning. Release downloads remain integrity-protected by the signed AniCloud update manifest and published SHA-256 checksums.
           repository: devz-on/anicloudesk
           token: ${{ secrets.RELEASE_GITHUB_TOKEN }}
           files: release-assets/*
