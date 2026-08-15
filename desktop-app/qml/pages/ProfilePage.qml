@@ -27,7 +27,16 @@ Flickable {
                 Text { text: "Default audio"; color: Theme.text }
                 ComboBox { model: ["sub", "dub"]; currentIndex: Runtime.audioPreference === "dub" ? 1 : 0; onActivated: Runtime.audioPreference = currentText; Accessible.name: "Default audio" }
                 Text { text: "Playback quality"; color: Theme.text }
-                ComboBox { model: ["auto", "1080p", "720p", "480p"]; currentIndex: Math.max(0, model.indexOf(Runtime.playbackQuality)); onActivated: { Runtime.playbackQuality = currentText; if (Account.authenticated) Account.setPlaybackPreference({ mode: currentText === "auto" ? "auto" : "height", height: currentText === "auto" ? null : Number(currentText.replace("p", "")) }) }; Accessible.name: "Playback quality" }
+                ComboBox {
+                    model: ["auto", "1080p", "720p", "480p"]
+                    currentIndex: Math.max(0, model.indexOf(Runtime.playbackQuality))
+                    onActivated: {
+                        Runtime.playbackQuality = currentText
+                        if (Account.authenticated)
+                            Account.setPlaybackPreference({ mode: currentText === "auto" ? "auto" : "height", height: currentText === "auto" ? null : Number(currentText.replace("p", "")) })
+                    }
+                    Accessible.name: "Playback quality"
+                }
                 Text { text: "Download quality"; color: Theme.text }
                 ComboBox { model: [1080, 720, 480, 360]; currentIndex: Math.max(0, model.indexOf(Runtime.downloadQuality)); onActivated: Runtime.downloadQuality = currentText; Accessible.name: "Download quality" }
             }
