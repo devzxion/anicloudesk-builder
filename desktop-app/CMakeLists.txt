@@ -60,7 +60,7 @@ set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 set(ANICLOUD_PROVIDER_API_BASE_URL "https://api.anicloud.ink/api/v1" CACHE STRING "AniCloud provider API")
 set(ANICLOUD_ACCOUNT_API_BASE_URL "https://api.anicloud.ink/public/api/v1" CACHE STRING "AniCloud account API")
-set(ANICLOUD_RELEASE_REPOSITORY "devz-on/anicloudesk-builder" CACHE STRING "GitHub release repository")
+set(ANICLOUD_RELEASE_REPOSITORY "devz-on/anicloudesk" CACHE STRING "GitHub release repository")
 set(ANICLOUD_UPDATE_PUBLIC_KEY_HEX "" CACHE STRING "Ed25519 public key used to verify desktop release manifests")
 if(CMAKE_BUILD_TYPE STREQUAL "Release" AND ANICLOUD_UPDATE_PUBLIC_KEY_HEX STREQUAL "")
   message(FATAL_ERROR "Release builds require ANICLOUD_UPDATE_PUBLIC_KEY_HEX")

@@ -44,13 +44,15 @@ jobs:
           [[ "$REQUESTED_TAG" == "desktop-v${version}" ]] || { echo "Expected desktop-v${version}, got $REQUESTED_TAG" >&2; exit 1; }
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$REQUESTED_TAG" >> "$GITHUB_OUTPUT"
-      - name: Require and derive manifest signing key
+      - name: Require production release credentials and derive manifest signing key
         id: update-key
         env:
           UPDATE_ED25519_SECRET_KEY_BASE64: ${{ secrets.UPDATE_ED25519_SECRET_KEY_BASE64 }}
+          RELEASE_GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           [[ -n "$UPDATE_ED25519_SECRET_KEY_BASE64" ]] || { echo "UPDATE_ED25519_SECRET_KEY_BASE64 is required" >&2; exit 1; }
+          [[ -n "$RELEASE_GITHUB_TOKEN" ]] || { echo "RELEASE_GITHUB_TOKEN is required" >&2; exit 1; }
           python -m pip install --disable-pip-version-check pynacl==1.5.0
           public_key="$(python desktop-app/scripts/derive_update_public_key.py)"
           echo "public_key=$public_key" >> "$GITHUB_OUTPUT"
@@ -282,7 +284,7 @@ jobs:
           python -m pip install --disable-pip-version-check pynacl==1.5.0
           python desktop-app/scripts/generate_release_manifest.py \
             --assets release-assets --version "$VERSION" \
-            --base-url "https://github.com/devz-on/anicloudesk-builder/releases/download/${TAG}" \
+            --base-url "https://github.com/devz-on/anicloudesk/releases/download/${TAG}" \
             --secret-key-base64 "$UPDATE_ED25519_SECRET_KEY_BASE64" \
             --output release-assets/desktop-release-manifest.json
           (cd release-assets && sha256sum "${expected[@]}" > SHA256SUMS.txt)
@@ -292,9 +294,11 @@ jobs:
           path: release-assets/*
           if-no-files-found: error
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2.6.2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.verify.outputs.tag }}
           name: AniCloud Native Desktop ${{ needs.verify.outputs.version }}
+          repository: devz-on/anicloudesk
+          token: ${{ secrets.RELEASE_GITHUB_TOKEN }}
           files: release-assets/*
           fail_on_unmatched_files: true

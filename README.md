@@ -1,6 +1,6 @@
 # AniCloud Native Desktop Builder
 
-This repository is the isolated build and release source for AniCloud Native Desktop 4.0. It contains only the C++20/Qt 6 desktop client and its packaging workflow. It does not contain or package Electron, Chromium, Qt WebEngine, HTML, React, Vite output, or the AniCloud website.
+This private repository is the isolated build source for AniCloud Native Desktop 4.0. It contains only the C++20/Qt 6 desktop client and its packaging workflow. It does not contain or package Electron, Chromium, Qt WebEngine, HTML, React, Vite output, or the AniCloud website. Verified production assets are published to the public [`devz-on/anicloudesk`](https://github.com/devz-on/anicloudesk) release repository.
 
 Production tag `desktop-v4.0.0` builds and publishes:
 
