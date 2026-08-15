@@ -333,10 +333,10 @@ QVariantMap ProviderClient::parseAnimeDetailsHtml(const QString &html, const QSt
 
   QMap<QString, QString> details;
   auto detailRows = rx(QStringLiteral(
-    "<(?:div|span)\\b[^>]*class\\s*=\\s*[\\\"'][^\\\"']*spaceit_pad[^\\\"']*[\\\"'][^>]*>(.*?)</(?:div|span)>"))
+    "<(div|span)\\b[^>]*class\\s*=\\s*[\\\"'][^\\\"']*spaceit_pad[^\\\"']*[\\\"'][^>]*>(.*?)</\\1>"))
                       .globalMatch(html);
   while (detailRows.hasNext()) {
-    const auto block = detailRows.next().captured(1);
+    const auto block = detailRows.next().captured(2);
     auto key = htmlText(capture(block, QStringLiteral(
       "<span\\b[^>]*class\\s*=\\s*[\\\"'][^\\\"']*dark_text[^\\\"']*[\\\"'][^>]*>(.*?)</span>")));
     key.remove(QLatin1Char(':'));
