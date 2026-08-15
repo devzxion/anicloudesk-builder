@@ -203,8 +203,8 @@ jobs:
           $application = Join-Path $installRoot 'bin\AniCloud.exe'
           if (-not (Test-Path -LiteralPath $launcher)) { throw 'Installed native launcher is missing' }
           if (-not (Test-Path -LiteralPath $application)) { throw 'Installed native application is missing' }
-          & $launcher --smoke-test
-          if ($LASTEXITCODE -ne 0) { throw "Installed AniCloud smoke test exited with $LASTEXITCODE" }
+          $smoke = Start-Process -FilePath $launcher -ArgumentList '--smoke-test' -Wait -PassThru
+          if ($smoke.ExitCode -ne 0) { throw "Installed AniCloud smoke test exited with $($smoke.ExitCode)" }
           $uninstaller = Join-Path $installRoot 'Uninstall AniCloud.exe'
           $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
           if ($uninstall.ExitCode -ne 0) { throw "AniCloud uninstaller exited with $($uninstall.ExitCode)" }
