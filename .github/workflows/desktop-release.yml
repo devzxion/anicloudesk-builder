@@ -150,6 +150,13 @@ jobs:
         if: matrix.platform != 'windows'
         shell: bash
         run: cmake --install desktop-app/out/release --prefix "$GITHUB_WORKSPACE/desktop-app/out/stage"
+      - name: Remove unused Linux SQL drivers
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          sqlite_driver="$(find desktop-app/out/stage -type f -name 'libqsqlite.so' -print -quit)"
+          test -n "$sqlite_driver"
+          find desktop-app/out/stage -type f -path '*/plugins/sqldrivers/*' ! -name 'libqsqlite.so' -delete
       - name: Smoke test Windows app
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -174,7 +181,13 @@ jobs:
           $stage = (Resolve-Path desktop-app\out\stage).Path
           $icon = (Resolve-Path desktop-app\resources\icon.ico).Path
           $output = (Resolve-Path desktop-app\out\artifacts).Path + "\AniCloud-Setup-$env:VERSION-windows-x64.exe"
-          & makensis.exe "/DSTAGE_DIR=$stage" "/DICON_FILE=$icon" "/DOUTPUT_FILE=$output" desktop-app\packaging\windows\installer.nsi
+          $makensis = @(
+            "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
+            "$env:ProgramFiles\NSIS\makensis.exe",
+            "$env:ChocolateyInstall\bin\makensis.exe"
+          ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $makensis) { throw 'NSIS compiler was not found after installation' }
+          & $makensis "/DSTAGE_DIR=$stage" "/DICON_FILE=$icon" "/DOUTPUT_FILE=$output" desktop-app\packaging\windows\installer.nsi
           Compress-Archive -Path desktop-app\out\stage\* -DestinationPath "desktop-app\out\artifacts\AniCloud-$env:VERSION-windows-x64-portable.zip"
 
       - name: Package Linux assets

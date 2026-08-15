@@ -121,7 +121,7 @@ ApplicationWindow {
 
     Rectangle {
         anchors.fill: parent; z: 190
-        visible: (Account.maintenance.enabled || Account.maintenance.active) && !Updates.mandatory
+        visible: Boolean(Account.maintenance.enabled || Account.maintenance.active) && !Updates.mandatory
         color: "#F509090B"
         EmptyState { anchors.centerIn: parent; title: Account.maintenance.title || "AniCloud is under maintenance"; message: Account.maintenance.message || "Please try again later."; symbol: "⚙" }
     }
