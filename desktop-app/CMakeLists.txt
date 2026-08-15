@@ -16,7 +16,7 @@ set(CMAKE_AUTOUIC ON)
 include(FetchContent)
 include(GNUInstallDirs)
 
-find_package(Qt6 6.11 REQUIRED COMPONENTS
+find_package(Qt6 6.10 REQUIRED COMPONENTS
   Core Gui Qml Quick QuickControls2 Network Sql Multimedia Concurrent Widgets Test QuickTest
 )
 find_package(unofficial-sodium CONFIG REQUIRED)
@@ -54,7 +54,7 @@ else()
   message(FATAL_ERROR "QtKeychain's Qt 6 CMake target was not created")
 endif()
 
-qt_standard_project_setup(REQUIRES 6.11)
+qt_standard_project_setup(REQUIRES 6.10)
 
 set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 

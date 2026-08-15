@@ -6,7 +6,7 @@ This is the official native Windows, macOS, and Linux client. It is a C++20/Qt Q
 
 - CMake 3.28+
 - Ninja 1.11+
-- Qt 6.11.1 with Qt Declarative, Qt Multimedia, and its FFmpeg backend
+- Qt 6.10.3 with Qt Declarative, Qt Multimedia, and its FFmpeg backend
 - MSVC 2022 on Windows, Apple Clang/Xcode 16 on macOS, or GCC 12+ on Ubuntu 22.04-class Linux
 - vcpkg at baseline `e55144c5a465b53bc71bd0b59111ea0b8bb039a5` (libsodium 1.0.22)
 - QtKeychain 0.17.0, fetched and pinned by CMake
