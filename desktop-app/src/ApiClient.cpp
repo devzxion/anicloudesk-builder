@@ -235,7 +235,7 @@ void ProviderClient::getText(const QUrl &url,
   ++m_pending;
   if (!wasLoading) emit loadingChanged();
   auto *reply = m_network.get(request);
-  connect(reply, &QNetworkReply::finished, this, [this, reply, success = std::move(success), failure = std::move(failure)] {
+  connect(reply, &QNetworkReply::finished, this, [this, reply, reportError, success = std::move(success), failure = std::move(failure)] {
     const auto body = reply->readAll();
     const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const bool ok = reply->error() == QNetworkReply::NoError && status >= 200 && status < 300 && !body.isEmpty();
