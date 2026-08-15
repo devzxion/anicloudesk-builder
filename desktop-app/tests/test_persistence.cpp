@@ -25,14 +25,14 @@ private slots:
     SecureStore store(nullptr, QByteArray(32, 'k'));
     Database database(&store, directory.path());
     QString error; QVERIFY2(database.open(&error), qPrintable(error));
-    QVERIFY(database.saveLocalProgress({
+    QVERIFY2(database.saveLocalProgress({
       {QStringLiteral("animeId"), QStringLiteral("anime-1")},
       {QStringLiteral("episodeId"), QStringLiteral("episode-1")},
       {QStringLiteral("animeName"), QStringLiteral("Example")},
       {QStringLiteral("episodeName"), QStringLiteral("Episode 1")},
       {QStringLiteral("positionSeconds"), 42},
       {QStringLiteral("durationSeconds"), 1200},
-    }, &error));
+    }, &error), qPrintable(error));
     const auto history = database.localHistory();
     QCOMPARE(history.size(), 1);
     QCOMPARE(history.first().toMap().value(QStringLiteral("positionSeconds")).toInt(), 42);

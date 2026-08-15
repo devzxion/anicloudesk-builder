@@ -127,7 +127,7 @@ bool Database::saveLocalProgress(const QVariantMap &r, QString *error) {
   QSqlQuery query(m_database);
   query.prepare(QStringLiteral("INSERT INTO local_history(anime_id,episode_id,anime_name,anime_image,episode_number,episode_name,audio_mode,server,position_seconds,duration_seconds,episode_count,watched_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(anime_id,episode_id) DO UPDATE SET anime_name=excluded.anime_name,anime_image=excluded.anime_image,episode_number=excluded.episode_number,episode_name=excluded.episode_name,audio_mode=excluded.audio_mode,server=excluded.server,position_seconds=excluded.position_seconds,duration_seconds=excluded.duration_seconds,episode_count=excluded.episode_count,watched_at=excluded.watched_at"));
   query.addBindValue(r.value(QStringLiteral("animeId"))); query.addBindValue(r.value(QStringLiteral("episodeId")));
-  query.addBindValue(r.value(QStringLiteral("animeName"))); query.addBindValue(r.value(QStringLiteral("animeImage"), QString{}));
+  query.addBindValue(r.value(QStringLiteral("animeName"))); query.addBindValue(r.value(QStringLiteral("animeImage"), QStringLiteral("")));
   query.addBindValue(r.value(QStringLiteral("episodeNumber"), 0)); query.addBindValue(r.value(QStringLiteral("episodeName")));
   query.addBindValue(r.value(QStringLiteral("audioMode"), QStringLiteral("sub"))); query.addBindValue(r.value(QStringLiteral("server"), QStringLiteral("hd-1")));
   query.addBindValue(r.value(QStringLiteral("positionSeconds"))); query.addBindValue(r.value(QStringLiteral("durationSeconds")));
