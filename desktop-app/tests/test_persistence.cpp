@@ -57,6 +57,9 @@ private slots:
         {QStringLiteral("rootPath"), QStringLiteral("/managed/") + id},
         {QStringLiteral("mediaUrl"), QStringLiteral("https://secret.example/master.m3u8")},
         {QStringLiteral("referer"), QStringLiteral("https://secret.example/")},
+        {QStringLiteral("introStart"), 5}, {QStringLiteral("introEnd"), 85},
+        {QStringLiteral("outroStart"), 1300}, {QStringLiteral("outroEnd"), 1370},
+        {QStringLiteral("subtitles"), QVariantList{QVariantMap{{QStringLiteral("label"), QStringLiteral("English")}, {QStringLiteral("localPath"), QStringLiteral("resources/en.vtt")}}}},
       };
     };
     QVERIFY(database.upsertDownload(record(QStringLiteral("one"), QStringLiteral("owner-a")), &error));
@@ -64,6 +67,8 @@ private slots:
     QCOMPARE(database.downloads(QStringLiteral("owner-a")).size(), 1);
     QCOMPARE(database.downloads(QStringLiteral("owner-b")).size(), 1);
     QCOMPARE(database.downloads(QStringLiteral("owner-a")).first().toMap().value(QStringLiteral("mediaUrl")).toString(), QStringLiteral("https://secret.example/master.m3u8"));
+    QCOMPARE(database.downloads(QStringLiteral("owner-a")).first().toMap().value(QStringLiteral("introEnd")).toInt(), 85);
+    QCOMPARE(database.downloads(QStringLiteral("owner-a")).first().toMap().value(QStringLiteral("subtitles")).toList().size(), 1);
     QVERIFY(database.upsertDownloadResource(QStringLiteral("one"), {
       {QStringLiteral("id"), QStringLiteral("segment")}, {QStringLiteral("url"), QStringLiteral("https://secret.example/segment.ts")},
       {QStringLiteral("relativePath"), QStringLiteral("resources/segment.ts")},

@@ -69,7 +69,7 @@ Flickable {
             columnSpacing: 16; rowSpacing: 16
 
             Rectangle {
-                Layout.fillWidth: true; Layout.preferredHeight: 238
+                Layout.fillWidth: true; Layout.preferredHeight: 278
                 radius: Theme.radius; color: Theme.surface; border.color: Theme.border
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 18; spacing: 12
@@ -77,7 +77,7 @@ Flickable {
                     Text { text: "Choose the defaults used when an episode starts."; color: Theme.muted; font.pixelSize: 12; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     Item { Layout.preferredHeight: 2 }
                     RowLayout {
-                        Layout.fillWidth: true
+                        Layout.fillWidth: true; Layout.preferredHeight: 42
                         Text { text: "Default audio"; color: Theme.text; Layout.fillWidth: true }
                         ComboBox {
                             Layout.preferredWidth: 158; model: ["Sub", "Dub"]
@@ -87,7 +87,7 @@ Flickable {
                         }
                     }
                     RowLayout {
-                        Layout.fillWidth: true
+                        Layout.fillWidth: true; Layout.preferredHeight: 42
                         Text { text: "Playback quality"; color: Theme.text; Layout.fillWidth: true }
                         ComboBox {
                             Layout.preferredWidth: 158; model: ["Auto", "1080p", "720p", "480p"]
@@ -101,7 +101,7 @@ Flickable {
                         }
                     }
                     RowLayout {
-                        Layout.fillWidth: true
+                        Layout.fillWidth: true; Layout.preferredHeight: 42
                         Text { text: "Download quality"; color: Theme.text; Layout.fillWidth: true }
                         ComboBox {
                             Layout.preferredWidth: 158; model: ["1080p", "720p", "480p", "360p"]
@@ -114,7 +114,7 @@ Flickable {
             }
 
             Rectangle {
-                Layout.fillWidth: true; Layout.preferredHeight: 238
+                Layout.fillWidth: true; Layout.preferredHeight: 278
                 radius: Theme.radius; color: Theme.surface; border.color: Theme.border
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 18; spacing: 12

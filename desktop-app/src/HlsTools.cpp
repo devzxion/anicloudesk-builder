@@ -31,6 +31,29 @@ QList<QString> lines(const QByteArray &manifest) {
   for (const auto &line : decoded.split(QLatin1Char('\n'))) result.append(line.endsWith(QLatin1Char('\r')) ? line.chopped(1) : line);
   return result;
 }
+
+QString quotedAttribute(QString value) {
+  value.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+  value.replace(QLatin1Char('"'), QStringLiteral("\\\""));
+  value.remove(QRegularExpression(QStringLiteral("[\\r\\n]")));
+  return value;
+}
+
+QStringList subtitleLines(const QList<QPair<QString, QUrl>> &tracks) {
+  QStringList result;
+  for (qsizetype index = 0; index < tracks.size(); ++index) {
+    const auto &track = tracks.at(index);
+    if (!track.second.isValid()) continue;
+    const auto label = quotedAttribute(track.first.isEmpty()
+      ? QStringLiteral("Captions %1").arg(index + 1) : track.first);
+    result.append(QStringLiteral(
+      "#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"anicloud-subs\",NAME=\"%1\","
+      "DEFAULT=%2,AUTOSELECT=YES,FORCED=NO,URI=\"%3\"")
+      .arg(label, index == 0 ? QStringLiteral("YES") : QStringLiteral("NO"),
+           track.second.toString(QUrl::FullyEncoded)));
+  }
+  return result;
+}
 }
 
 namespace HlsTools {
@@ -117,6 +140,39 @@ QByteArray rewrite(const QByteArray &manifest, const QUrl &baseUrl,
       output.append(rawLine);
     }
   }
+  return output.join(QLatin1Char('\n')).toUtf8();
+}
+
+QByteArray addSubtitleTracks(const QByteArray &masterManifest,
+                             const QList<QPair<QString, QUrl>> &tracks) {
+  const auto media = subtitleLines(tracks);
+  if (media.isEmpty() || !masterManifest.contains("#EXT-X-STREAM-INF")) return masterManifest;
+  auto source = lines(masterManifest);
+  QStringList output;
+  bool inserted = false;
+  for (auto line : source) {
+    output.append(line);
+    if (!inserted && line.trimmed().compare(QStringLiteral("#EXTM3U"), Qt::CaseInsensitive) == 0) {
+      output.append(media);
+      inserted = true;
+    }
+  }
+  for (auto &line : output) {
+    if (line.trimmed().startsWith(QStringLiteral("#EXT-X-STREAM-INF:"), Qt::CaseInsensitive) &&
+        !line.contains(QStringLiteral("SUBTITLES="), Qt::CaseInsensitive))
+      line.append(QStringLiteral(",SUBTITLES=\"anicloud-subs\""));
+  }
+  return output.join(QLatin1Char('\n')).toUtf8();
+}
+
+QByteArray makeOfflineMaster(const QUrl &mediaPlaylist,
+                             const QList<QPair<QString, QUrl>> &tracks) {
+  QStringList output{QStringLiteral("#EXTM3U"), QStringLiteral("#EXT-X-VERSION:3")};
+  output.append(subtitleLines(tracks));
+  auto streamInfo = QStringLiteral("#EXT-X-STREAM-INF:BANDWIDTH=8000000");
+  if (!tracks.isEmpty()) streamInfo.append(QStringLiteral(",SUBTITLES=\"anicloud-subs\""));
+  output.append(streamInfo);
+  output.append(mediaPlaylist.toString(QUrl::FullyEncoded));
   return output.join(QLatin1Char('\n')).toUtf8();
 }
 

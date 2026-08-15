@@ -11,13 +11,22 @@
 PlayerController::PlayerController(ProviderClient *provider, AccountClient *account, HlsGateway *gateway, QObject *parent)
   : QObject(parent), m_provider(provider), m_account(account), m_gateway(gateway) {
   m_player.setAudioOutput(&m_audio);
-  m_audio.setVolume(0.8);
+  m_volume = qBound(0.0, QSettings().value(QStringLiteral("playback/volume"), 0.8).toDouble(), 1.0);
+  m_volumeBoost = qBound(1.0, QSettings().value(QStringLiteral("playback/volumeBoost"), 1.0).toDouble(), 2.0);
+  applyAudioGain();
   m_quality = QSettings().value(QStringLiteral("playback/quality"), QStringLiteral("auto")).toString().toLower();
-  connect(&m_player, &QMediaPlayer::positionChanged, this, &PlayerController::positionChanged);
+  connect(&m_player, &QMediaPlayer::positionChanged, this, [this](qint64 position) {
+    if (position > m_lastProgressPosition + 500) {
+      m_lastProgressPosition = position;
+      m_bufferRetries = 0;
+    }
+    emit positionChanged();
+  });
   connect(&m_player, &QMediaPlayer::durationChanged, this, &PlayerController::durationChanged);
+  connect(&m_player, &QMediaPlayer::bufferProgressChanged, this, &PlayerController::bufferProgressChanged);
   connect(&m_player, &QMediaPlayer::playbackRateChanged, this, &PlayerController::speedChanged);
   connect(&m_player, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState state) {
-    if (state == QMediaPlayer::PlayingState) setState(QStringLiteral("playing"));
+    if (state == QMediaPlayer::PlayingState) { m_bufferTimer.stop(); setState(QStringLiteral("playing")); }
     else if (state == QMediaPlayer::PausedState) { setState(QStringLiteral("paused")); saveProgress(); }
     else if (!m_player.source().isEmpty() && m_player.mediaStatus() == QMediaPlayer::EndOfMedia) { saveProgress(); nextEpisode(); }
   });
@@ -51,9 +60,9 @@ PlayerController::PlayerController(ProviderClient *provider, AccountClient *acco
   connect(&m_progressTimer, &QTimer::timeout, this, &PlayerController::saveProgress);
   m_progressTimer.start();
   m_bufferTimer.setSingleShot(true);
-  m_bufferTimer.setInterval(20'000);
+  m_bufferTimer.setInterval(15'000);
   connect(&m_bufferTimer, &QTimer::timeout, this, [this] {
-    if (++m_bufferRetries <= 2) { const auto at = position(); m_player.stop(); m_restorePosition = at; loadStream(m_stream); }
+    if (++m_bufferRetries <= 1) { const auto at = position(); m_player.stop(); m_restorePosition = at; loadStream(m_stream); }
     else failOrFallback(QStringLiteral("Playback remained stalled."));
   });
 }
@@ -96,9 +105,17 @@ void PlayerController::openOffline(const QVariantMap &download) {
   }
   const auto path = download.value(QStringLiteral("rootPath")).toString() + QStringLiteral("/offline.m3u8");
   if (!QFileInfo::exists(path)) { setError(QStringLiteral("The offline library is missing its playlist.")); setState(QStringLiteral("error")); return; }
-  m_current = download; m_stream.clear(); m_restorePosition = download.value(QStringLiteral("positionMilliseconds")).toLongLong();
-  m_restorePlaying = true; emit currentChanged(); setError({}); setState(QStringLiteral("loading"));
+  if (!m_sessionId.isEmpty()) m_gateway->closeSession(m_sessionId);
+  m_sessionId.clear();
+  m_current = download; m_stream = download;
+  m_server = download.value(QStringLiteral("server"), QStringLiteral("offline")).toString();
+  m_audioMode = download.value(QStringLiteral("audioMode"), QStringLiteral("sub")).toString();
+  m_captions = download.value(QStringLiteral("subtitles")).toList();
+  m_restorePosition = download.value(QStringLiteral("positionMilliseconds")).toLongLong();
+  m_restorePlaying = true; m_bufferRetries = 0; m_lastProgressPosition = 0;
+  emit captionsChanged(); emit currentChanged(); setError({}); setState(QStringLiteral("loading"));
   m_player.setSource(QUrl::fromLocalFile(path));
+  m_player.play();
 }
 
 void PlayerController::resolve(bool preserveState) {
@@ -107,6 +124,7 @@ void PlayerController::resolve(bool preserveState) {
     m_restoreCaptionIndex = m_player.activeSubtitleTrack();
   }
   setError({}); setState(QStringLiteral("resolving")); ++m_generation; m_alternateIndex = -1; m_bufferRetries = 0;
+  m_lastProgressPosition = 0;
   m_provider->resolveStream(m_generation, m_current.value(QStringLiteral("episodeId"), m_current.value(QStringLiteral("id"))).toString(), m_server, m_audioMode);
 }
 
@@ -134,6 +152,7 @@ void PlayerController::loadStream(const QVariantMap &stream) {
   m_sessionId = parts.size() >= 2 ? parts.at(1) : QString{};
   setError({}); setState(QStringLiteral("loading"));
   m_player.setSource(QUrl(local));
+  m_player.play();
 }
 
 void PlayerController::failOrFallback(const QString &message) {
@@ -164,8 +183,26 @@ void PlayerController::pause() { m_restorePlaying = false; m_player.pause(); }
 void PlayerController::togglePlayback() { playing() ? pause() : play(); }
 void PlayerController::seek(qint64 milliseconds) { m_player.setPosition(qBound<qint64>(0, milliseconds, duration())); }
 void PlayerController::seekBy(qint64 deltaMilliseconds) { seek(position() + deltaMilliseconds); }
-void PlayerController::setVolume(double volume) { const float value = qBound(0.0f, static_cast<float>(volume), 1.0f); if (qFuzzyCompare(m_audio.volume(), value)) return; m_audio.setVolume(value); emit volumeChanged(); }
+void PlayerController::setVolume(double volume) {
+  const auto value = qBound(0.0, volume, 1.0);
+  if (qFuzzyCompare(m_volume, value)) return;
+  m_volume = value; QSettings().setValue(QStringLiteral("playback/volume"), value);
+  applyAudioGain(); emit volumeChanged();
+}
 void PlayerController::adjustVolume(double delta) { setVolume(volume() + delta); }
+void PlayerController::setVolumeBoost(double boost) {
+  const auto value = qBound(1.0, boost, 2.0);
+  if (qFuzzyCompare(m_volumeBoost, value)) return;
+  m_volumeBoost = value; QSettings().setValue(QStringLiteral("playback/volumeBoost"), value);
+  applyAudioGain(); emit volumeBoostChanged();
+}
+void PlayerController::cycleVolumeBoost() {
+  if (m_volumeBoost < 1.24) setVolumeBoost(1.25);
+  else if (m_volumeBoost < 1.49) setVolumeBoost(1.5);
+  else if (m_volumeBoost < 1.99) setVolumeBoost(2.0);
+  else setVolumeBoost(1.0);
+}
+void PlayerController::applyAudioGain() { m_audio.setVolume(static_cast<float>(qMin(1.0, m_volume * m_volumeBoost))); }
 void PlayerController::setSpeed(double speed) { m_player.setPlaybackRate(qBound(0.25, speed, 3.0)); }
 void PlayerController::setQuality(const QString &quality) {
   const auto normalized = quality.trimmed().toLower();
@@ -215,7 +252,8 @@ void PlayerController::saveProgress() {
 void PlayerController::close() {
   saveProgress(); m_player.stop(); m_player.setSource(QUrl{});
   if (!m_sessionId.isEmpty()) m_gateway->closeSession(m_sessionId);
-  m_sessionId.clear(); m_current.clear(); m_stream.clear(); setError({}); setState(QStringLiteral("idle")); emit currentChanged();
+  m_sessionId.clear(); m_current.clear(); m_stream.clear(); m_captions.clear();
+  setError({}); setState(QStringLiteral("idle")); emit captionsChanged(); emit currentChanged();
 }
 
 void PlayerController::nextEpisode() { saveProgress(); emit requestNextEpisode(m_current); }

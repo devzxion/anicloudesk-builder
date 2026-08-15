@@ -7,7 +7,9 @@
 #include <QTcpServer>
 #include <QTimer>
 #include <QUrl>
+#include <QVariantList>
 #include <QVariantMap>
+#include <functional>
 
 class QTcpSocket;
 
@@ -33,8 +35,10 @@ signals:
 private:
   struct Session {
     QVariantMap headers;
+    QVariantList subtitles;
     QHash<QString, QUrl> resources;
     QHash<QString, QString> identifiers;
+    QString rootResourceId;
     QDateTime expiresAt;
   };
 
@@ -43,6 +47,10 @@ private:
   void readRequest(QTcpSocket *socket);
   void proxy(QTcpSocket *socket, const QByteArray &method, const QString &token,
              const QString &resourceId, const QHash<QByteArray, QByteArray> &incomingHeaders);
+  void proxyResolved(QTcpSocket *socket, const QByteArray &method, const QString &token,
+                     const QString &resourceId, const QHash<QByteArray, QByteArray> &incomingHeaders,
+                     const QString &publicAddress);
+  void resolvePublicAddress(const QString &host, std::function<void(const QString &)> callback);
   QUrl localUrl(const QString &token, const QUrl &upstream);
   void sendError(QTcpSocket *socket, int status, const QByteArray &reason);
   static QByteArray reasonFor(int status);
@@ -50,5 +58,7 @@ private:
   QTcpServer m_server;
   QNetworkAccessManager m_network;
   QHash<QString, Session> m_sessions;
+  QHash<QString, QString> m_publicAddresses;
+  QHash<QString, QList<std::function<void(const QString &)>>> m_dnsWaiters;
   QTimer m_expiryTimer;
 };

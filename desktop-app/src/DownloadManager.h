@@ -55,6 +55,7 @@ private:
   bool queueResource(Job *job, const Resource &resource);
   void pump(Job *job);
   void fetchResource(Job *job, const Resource &resource);
+  void resolveDownloadHosts(Job *job);
   void writeResourceData(Job *job, QNetworkReply *reply);
   void closeResourceWriter(Job *job, QNetworkReply *reply);
   void finishResource(Job *job, QNetworkReply *reply);
@@ -68,6 +69,7 @@ private:
   AccountClient *m_account = nullptr;
   ProviderClient *m_provider = nullptr;
   QNetworkAccessManager m_network;
+  QHash<QString, QString> m_publicAddresses;
   QHash<QString, Job *> m_jobs;
   QVariantList m_items;
   QString m_error;

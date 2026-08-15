@@ -105,6 +105,11 @@ ApplicationWindow {
         visible: Player.state !== "idle"
         z: 100
         onVisibleChanged: if (visible) forceActiveFocus()
+        onToggleFullscreenRequested: window.visibility = window.visibility === Window.FullScreen ? Window.Windowed : Window.FullScreen
+        onEscapeRequested: {
+            if (window.visibility === Window.FullScreen) window.showNormal()
+            else Player.close()
+        }
     }
 
     Rectangle {
@@ -128,7 +133,6 @@ ApplicationWindow {
         EmptyState { anchors.centerIn: parent; title: Account.maintenance.title || "AniCloud is under maintenance"; message: Account.maintenance.message || "Please try again later."; symbol: "⚙" }
     }
 
-    Shortcut { sequence: "F"; enabled: playerPage.visible; onActivated: window.visibility = window.visibility === Window.FullScreen ? Window.Windowed : Window.FullScreen }
     Connections {
         target: Player
         function onStateChanged() { if (Player.state === "idle" && window.visibility === Window.FullScreen) window.showNormal() }

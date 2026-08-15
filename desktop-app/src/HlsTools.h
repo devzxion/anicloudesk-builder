@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QList>
+#include <QPair>
 #include <QString>
 #include <QUrl>
 #include <functional>
@@ -27,5 +28,11 @@ struct Resource {
 [[nodiscard]] QList<Resource> resources(const QByteArray &manifest, const QUrl &baseUrl);
 [[nodiscard]] QByteArray rewrite(const QByteArray &manifest, const QUrl &baseUrl,
                                  const std::function<QUrl(const QUrl &)> &mapUrl);
+[[nodiscard]] QByteArray addSubtitleTracks(
+  const QByteArray &masterManifest,
+  const QList<QPair<QString, QUrl>> &tracks);
+[[nodiscard]] QByteArray makeOfflineMaster(
+  const QUrl &mediaPlaylist,
+  const QList<QPair<QString, QUrl>> &tracks);
 
 } // namespace HlsTools

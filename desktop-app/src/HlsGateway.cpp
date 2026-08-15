@@ -4,9 +4,14 @@
 
 #include <QCryptographicHash>
 #include <QHostAddress>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QPointer>
 #include <QTcpSocket>
+#include <QUrlQuery>
 #include <QUuid>
 
 namespace {
@@ -16,6 +21,13 @@ constexpr qsizetype MaxRequestBytes = 32 * 1024;
 QByteArray headerValue(const QList<QNetworkReply::RawHeaderPair> &headers, const QByteArray &name) {
   for (const auto &pair : headers) if (pair.first.compare(name, Qt::CaseInsensitive) == 0) return pair.second;
   return {};
+}
+
+bool needsPublicResolution(const QString &host) {
+  const auto normalized = host.toLower();
+  return normalized.endsWith(QStringLiteral(".tiktokcdn.com")) ||
+         normalized.endsWith(QStringLiteral(".byteoversea.com")) ||
+         normalized.endsWith(QStringLiteral(".ibyteimg.com"));
 }
 }
 
@@ -48,18 +60,15 @@ QString HlsGateway::openSession(const QVariantMap &stream) {
   const auto token = QUuid::createUuid().toString(QUuid::WithoutBraces).remove(QLatin1Char('-'));
   Session session;
   session.headers = stream.value(QStringLiteral("headers")).toMap();
+  session.subtitles = stream.value(QStringLiteral("subtitles")).toList();
   const auto referer = stream.value(QStringLiteral("referer")).toString();
-  if (!referer.isEmpty()) {
-    session.headers.insert(QStringLiteral("Referer"), referer);
-    if (!session.headers.contains(QStringLiteral("Origin"))) {
-      const QUrl refererUrl(referer);
-      if (refererUrl.isValid() && !refererUrl.scheme().isEmpty() && !refererUrl.authority().isEmpty())
-        session.headers.insert(QStringLiteral("Origin"), QStringLiteral("%1://%2").arg(refererUrl.scheme(), refererUrl.authority()));
-    }
-  }
+  if (!referer.isEmpty()) session.headers.insert(QStringLiteral("Referer"), referer);
   session.expiresAt = QDateTime::currentDateTimeUtc().addSecs(SessionLifetimeMinutes * 60);
   m_sessions.insert(token, session);
-  return localUrl(token, upstream).toString(QUrl::FullyEncoded);
+  const auto result = localUrl(token, upstream);
+  const auto path = result.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+  if (path.size() == 3) m_sessions[token].rootResourceId = path.at(2);
+  return result.toString(QUrl::FullyEncoded);
 }
 
 void HlsGateway::closeSession(const QString &sessionId) { m_sessions.remove(sessionId); }
@@ -120,12 +129,41 @@ void HlsGateway::proxy(QTcpSocket *socket, const QByteArray &method, const QStri
   const auto upstream = it->resources.value(resourceId);
   if (!upstream.isValid()) { sendError(socket, 404, QByteArrayLiteral("Not Found")); return; }
   it->expiresAt = QDateTime::currentDateTimeUtc().addSecs(SessionLifetimeMinutes * 60);
-  QNetworkRequest request(upstream);
+  if (needsPublicResolution(upstream.host())) {
+    const QPointer<QTcpSocket> guardedSocket(socket);
+    resolvePublicAddress(upstream.host(), [this, guardedSocket, method, token, resourceId, incomingHeaders](const QString &address) {
+      if (guardedSocket && guardedSocket->state() != QAbstractSocket::UnconnectedState)
+        proxyResolved(guardedSocket, method, token, resourceId, incomingHeaders, address);
+    });
+    return;
+  }
+  proxyResolved(socket, method, token, resourceId, incomingHeaders, {});
+}
+
+void HlsGateway::proxyResolved(QTcpSocket *socket, const QByteArray &method, const QString &token,
+                               const QString &resourceId, const QHash<QByteArray, QByteArray> &incomingHeaders,
+                               const QString &publicAddress) {
+  auto it = m_sessions.find(token);
+  if (it == m_sessions.end()) { sendError(socket, 410, QByteArrayLiteral("Gone")); return; }
+  const auto upstream = it->resources.value(resourceId);
+  if (!upstream.isValid()) { sendError(socket, 404, QByteArrayLiteral("Not Found")); return; }
+  auto routedUrl = upstream;
+  if (!publicAddress.isEmpty()) routedUrl.setHost(publicAddress);
+  QNetworkRequest request(routedUrl);
   request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
   request.setTransferTimeout(30'000);
   for (auto header = it->headers.cbegin(); header != it->headers.cend(); ++header)
     if (!header.value().toString().isEmpty()) request.setRawHeader(header.key().toUtf8(), header.value().toString().toUtf8());
-  if (!request.hasRawHeader(QByteArrayLiteral("User-Agent"))) request.setRawHeader(QByteArrayLiteral("User-Agent"), QByteArrayLiteral("AniCloudDesktop/4.0.1 (Qt; native)"));
+  if (!publicAddress.isEmpty()) {
+    request.setPeerVerifyName(upstream.host());
+    auto hostHeader = upstream.host().toUtf8();
+    if (upstream.port() > 0 && upstream.port() != 443) hostHeader += QByteArrayLiteral(":") + QByteArray::number(upstream.port());
+    request.setRawHeader(QByteArrayLiteral("Host"), hostHeader);
+  }
+  if (!request.hasRawHeader(QByteArrayLiteral("User-Agent")))
+    request.setRawHeader(QByteArrayLiteral("User-Agent"), QByteArrayLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/148.0.0.0 Safari/537.36"));
+  request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("*/*"));
+  request.setRawHeader(QByteArrayLiteral("Accept-Encoding"), QByteArrayLiteral("identity"));
   if (incomingHeaders.contains(QByteArrayLiteral("range"))) request.setRawHeader(QByteArrayLiteral("Range"), incomingHeaders.value(QByteArrayLiteral("range")));
   auto *reply = method == QByteArrayLiteral("HEAD") ? m_network.head(request) : m_network.get(request);
   connect(socket, &QTcpSocket::disconnected, reply, &QNetworkReply::abort);
@@ -140,6 +178,16 @@ void HlsGateway::proxy(QTcpSocket *socket, const QByteArray &method, const QStri
     const auto finalUrl = reply->url().isValid() ? reply->url() : upstream;
     if (method != QByteArrayLiteral("HEAD") && HlsTools::looksLikePlaylist(body, finalUrl)) {
       body = HlsTools::rewrite(body, finalUrl, [this, token](const QUrl &url) { return localUrl(token, url); });
+      const auto session = m_sessions.constFind(token);
+      if (session != m_sessions.cend() && session->rootResourceId == resourceId && !session->subtitles.isEmpty()) {
+        QList<QPair<QString, QUrl>> captions;
+        for (const auto &value : session->subtitles) {
+          const auto track = value.toMap();
+          const QUrl url(track.value(QStringLiteral("url"), track.value(QStringLiteral("file"))).toString());
+          if (url.isValid()) captions.append({track.value(QStringLiteral("label"), QStringLiteral("Captions")).toString(), localUrl(token, url)});
+        }
+        body = HlsTools::addSubtitleTracks(body, captions);
+      }
       contentType = QByteArrayLiteral("application/vnd.apple.mpegurl");
     }
     QByteArray response = QByteArrayLiteral("HTTP/1.1 ") + QByteArray::number(status) + QByteArrayLiteral(" ") + reasonFor(status) + QByteArrayLiteral("\r\n");
@@ -154,6 +202,40 @@ void HlsGateway::proxy(QTcpSocket *socket, const QByteArray &method, const QStri
     socket->write(response);
     if (method != QByteArrayLiteral("HEAD")) socket->write(body);
     socket->disconnectFromHost(); reply->deleteLater();
+  });
+}
+
+void HlsGateway::resolvePublicAddress(const QString &host, std::function<void(const QString &)> callback) {
+  if (m_publicAddresses.contains(host)) { callback(m_publicAddresses.value(host)); return; }
+  m_dnsWaiters[host].append(std::move(callback));
+  if (m_dnsWaiters.value(host).size() > 1) return;
+  QUrl url(QStringLiteral("https://cloudflare-dns.com/dns-query"));
+  QUrlQuery query;
+  query.addQueryItem(QStringLiteral("name"), host);
+  query.addQueryItem(QStringLiteral("type"), QStringLiteral("A"));
+  url.setQuery(query);
+  QNetworkRequest request(url);
+  request.setTransferTimeout(8'000);
+  request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/dns-json"));
+  request.setRawHeader(QByteArrayLiteral("User-Agent"), QByteArrayLiteral("AniCloudDesktop/4.0"));
+  auto *reply = m_network.get(request);
+  connect(reply, &QNetworkReply::finished, this, [this, reply, host] {
+    QString address;
+    const auto root = QJsonDocument::fromJson(reply->readAll()).object();
+    if (reply->error() == QNetworkReply::NoError) {
+      for (const auto &value : root.value(QStringLiteral("Answer")).toArray()) {
+        const auto answer = value.toObject();
+        QHostAddress candidate(answer.value(QStringLiteral("data")).toString());
+        if (answer.value(QStringLiteral("type")).toInt() == 1 && candidate.protocol() == QAbstractSocket::IPv4Protocol) {
+          address = candidate.toString();
+          break;
+        }
+      }
+    }
+    if (!address.isEmpty()) m_publicAddresses.insert(host, address);
+    const auto callbacks = m_dnsWaiters.take(host);
+    for (const auto &waiting : callbacks) waiting(address);
+    reply->deleteLater();
   });
 }
 

@@ -51,7 +51,8 @@ private slots:
     QCOMPARE(stream.value(QStringLiteral("subtitles")).toList().size(), 1);
     QCOMPARE(stream.value(QStringLiteral("introEnd")).toInt(), 89);
     QCOMPARE(stream.value(QStringLiteral("headers")).toMap().value(QStringLiteral("Referer")).toString(), QStringLiteral("https://embed.example/watch"));
-    QCOMPARE(stream.value(QStringLiteral("headers")).toMap().value(QStringLiteral("Origin")).toString(), QStringLiteral("https://embed.example"));
+    QVERIFY(stream.value(QStringLiteral("headers")).toMap().value(QStringLiteral("Origin")).toString().isEmpty());
+    QVERIFY(stream.value(QStringLiteral("headers")).toMap().value(QStringLiteral("User-Agent")).toString().startsWith(QStringLiteral("Mozilla/")));
   }
 
   void parsesBundledCatalogPagesWithoutAccountApi() {
@@ -95,6 +96,19 @@ private slots:
     QCOMPARE(details.value(QStringLiteral("status")).toString(), QStringLiteral("Finished Airing"));
     QCOMPARE(recommendations.size(), 1);
     QCOMPARE(recommendations.first().toMap().value(QStringLiteral("id")).toString(), QStringLiteral("1735"));
+  }
+
+  void parsesRealEpisodeNames() {
+    const auto html = QStringLiteral(
+      "<tr class=\"episode-list-data\">"
+      "<td class=\"episode-number nowrap\" data-raw=\"1\">1</td>"
+      "<td class=\"episode-title fs12\"><a href=\"/anime/20/Naruto/episode/1\">Enter: Naruto Uzumaki!</a>"
+      "<br><span>Sanjou! Uzumaki Naruto (参上！うずまきナルト)</span></td></tr>");
+    const auto episodes = ProviderClient::parseEpisodeNamesHtml(html, QStringLiteral("20"));
+    QCOMPARE(episodes.size(), 1);
+    QCOMPARE(episodes.first().toMap().value(QStringLiteral("number")).toInt(), 1);
+    QCOMPARE(episodes.first().toMap().value(QStringLiteral("title")).toString(), QStringLiteral("Enter: Naruto Uzumaki!"));
+    QCOMPARE(episodes.first().toMap().value(QStringLiteral("id")).toString(), QStringLiteral("20::ep=1"));
   }
 };
 

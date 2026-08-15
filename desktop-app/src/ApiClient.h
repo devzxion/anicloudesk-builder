@@ -62,6 +62,7 @@ public:
   static QVariantList parseTopAnimeHtml(const QString &html, int limit = 20);
   static QVariantList parseSeasonAnimeHtml(const QString &html, int page = 1, int limit = 20);
   static QVariantList parseSearchHtml(const QString &html, int limit = 20);
+  static QVariantList parseEpisodeNamesHtml(const QString &html, const QString &animeId);
   static QVariantMap parseAnimeDetailsHtml(const QString &html, const QString &animeId,
                                            QVariantList *recommendations = nullptr);
 
@@ -78,10 +79,13 @@ signals:
 private:
   using TextSuccess = std::function<void(const QByteArray &, const QUrl &)>;
   void getText(const QUrl &url, const QList<QPair<QByteArray, QByteArray>> &headers,
-               TextSuccess success, std::function<void(const QString &)> failure = {});
+               TextSuccess success, std::function<void(const QString &)> failure = {},
+               bool reportError = true);
   void resolveStreamPage(int generation, const QString &episodeId, const QString &server,
                          const QString &audioMode, bool allowFallback);
   void applyEpisodes(const QString &animeId, int episodeCount);
+  void loadEpisodeTitlesPage(const QString &animeId, const QUrl &episodeUrl,
+                             int offset, int episodeCount);
   void setError(const QString &error);
   static QJsonObject payload(const QJsonObject &root);
 

@@ -31,6 +31,23 @@ private slots:
     QVERIFY(!output.contains("media.example"));
     QVERIFY(output.startsWith("#EXTM3U"));
   }
+
+  void attachesOnlineAndOfflineCaptionTracks() {
+    const QByteArray master("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nvideo.m3u8");
+    const QList<QPair<QString, QUrl>> captions{
+      {QStringLiteral("English"), QUrl(QStringLiteral("http://127.0.0.1/subtitle"))},
+    };
+    const auto online = HlsTools::addSubtitleTracks(master, captions);
+    QVERIFY(online.contains("#EXT-X-MEDIA:TYPE=SUBTITLES"));
+    QVERIFY(online.contains("SUBTITLES=\"anicloud-subs\""));
+    QVERIFY(online.contains("http://127.0.0.1/subtitle"));
+
+    const auto offline = HlsTools::makeOfflineMaster(QUrl(QStringLiteral("media.m3u8")), {
+      {QStringLiteral("English"), QUrl(QStringLiteral("resources/en.vtt"))},
+    });
+    QVERIFY(offline.contains("resources/en.vtt"));
+    QVERIFY(offline.endsWith("media.m3u8"));
+  }
 };
 
 QTEST_GUILESS_MAIN(HlsToolsTest)

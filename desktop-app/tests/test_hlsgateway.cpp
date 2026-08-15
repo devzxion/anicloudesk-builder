@@ -56,8 +56,8 @@ private slots:
     QCOMPARE(segment.body, QByteArrayLiteral("BC"));
     QCOMPARE(segment.contentRange, QByteArrayLiteral("bytes 1-2/4"));
     QCOMPARE(m_lastHeaders.value(QByteArrayLiteral("referer")), QByteArrayLiteral("https://embed.example/watch/1"));
-    QCOMPARE(m_lastHeaders.value(QByteArrayLiteral("origin")), QByteArrayLiteral("https://embed.example"));
-    QVERIFY(m_lastHeaders.value(QByteArrayLiteral("user-agent")).startsWith("AniCloudDesktop/"));
+    QVERIFY(m_lastHeaders.value(QByteArrayLiteral("origin")).isEmpty());
+    QVERIFY(m_lastHeaders.value(QByteArrayLiteral("user-agent")).startsWith("Mozilla/"));
 
     const auto head = request(QNetworkRequest(segmentUrl), true);
     QCOMPARE(head.status, 200);
@@ -78,6 +78,23 @@ private slots:
 
     gateway.closeSession(parts.at(1));
     QCOMPARE(request(local).status, 410);
+  }
+
+  void injectsExternalCaptionsIntoAdaptiveMasters() {
+    HlsGateway gateway;
+    const auto local = gateway.openSession({
+      {QStringLiteral("mediaUrl"), upstreamUrl(QStringLiteral("/adaptive.m3u8")).toString()},
+      {QStringLiteral("subtitles"), QVariantList{QVariantMap{
+        {QStringLiteral("label"), QStringLiteral("English")},
+        {QStringLiteral("url"), upstreamUrl(QStringLiteral("/en.vtt")).toString()},
+      }}},
+    });
+    const auto manifest = request(QUrl(local));
+    QCOMPARE(manifest.status, 200);
+    QVERIFY(manifest.body.contains("#EXT-X-MEDIA:TYPE=SUBTITLES"));
+    QVERIFY(manifest.body.contains("NAME=\"English\""));
+    QVERIFY(manifest.body.contains("SUBTITLES=\"anicloud-subs\""));
+    QVERIFY(!manifest.body.contains(QByteArray::number(m_upstream.serverPort())));
   }
 
 private:
@@ -127,6 +144,16 @@ private:
     }
     if (path == QStringLiteral("/master.m3u8")) {
       const QByteArray body("#EXTM3U\n#EXTINF:5,\nsegment.ts");
+      writeResponse(socket, 200, method == QByteArrayLiteral("HEAD") ? QByteArray{} : body, body.size(), {});
+      return;
+    }
+    if (path == QStringLiteral("/adaptive.m3u8")) {
+      const QByteArray body("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\n/master.m3u8");
+      writeResponse(socket, 200, method == QByteArrayLiteral("HEAD") ? QByteArray{} : body, body.size(), {});
+      return;
+    }
+    if (path == QStringLiteral("/en.vtt")) {
+      const QByteArray body("WEBVTT\n\n00:00.000 --> 00:01.000\nHello");
       writeResponse(socket, 200, method == QByteArrayLiteral("HEAD") ? QByteArray{} : body, body.size(), {});
       return;
     }

@@ -101,6 +101,7 @@ qt_add_qml_module(AniCloud
     qml/components/EmptyState.qml
     qml/components/LoadingSkeleton.qml
     qml/components/NavigationRail.qml
+    qml/components/PlayerIconButton.qml
     qml/components/PosterRail.qml
     qml/pages/HomePage.qml
     qml/pages/DiscoverPage.qml
@@ -119,6 +120,17 @@ qt_add_qml_module(AniCloud
     resources/icons/library.svg
     resources/icons/profile.svg
     resources/icons/notification.svg
+    resources/icons/player-play.svg
+    resources/icons/player-pause.svg
+    resources/icons/player-back10.svg
+    resources/icons/player-forward10.svg
+    resources/icons/player-volume.svg
+    resources/icons/player-muted.svg
+    resources/icons/player-captions.svg
+    resources/icons/player-settings.svg
+    resources/icons/player-fullscreen.svg
+    resources/icons/player-next.svg
+    resources/icons/player-back.svg
 )
 
 target_include_directories(AniCloud PRIVATE

@@ -186,6 +186,10 @@ bool Database::upsertDownload(const QVariantMap &r, QString *error) {
     {QStringLiteral("referer"), r.value(QStringLiteral("referer"))},
     {QStringLiteral("headers"), r.value(QStringLiteral("headers"))},
     {QStringLiteral("subtitles"), r.value(QStringLiteral("subtitles"))},
+    {QStringLiteral("introStart"), r.value(QStringLiteral("introStart"))},
+    {QStringLiteral("introEnd"), r.value(QStringLiteral("introEnd"))},
+    {QStringLiteral("outroStart"), r.value(QStringLiteral("outroStart"))},
+    {QStringLiteral("outroEnd"), r.value(QStringLiteral("outroEnd"))},
   });
   if (sensitive.isEmpty()) {
     if (error) *error = QStringLiteral("Secure storage is unavailable; download metadata was not persisted");

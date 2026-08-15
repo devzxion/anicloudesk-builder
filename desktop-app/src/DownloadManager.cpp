@@ -4,12 +4,16 @@
 #include "Database.h"
 #include "HlsTools.h"
 
+#include <QAbstractSocket>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QFutureWatcher>
+#include <QHostAddress>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QNetworkInformation>
@@ -17,6 +21,7 @@
 #include <QSettings>
 #include <QSet>
 #include <QStorageInfo>
+#include <QUrlQuery>
 #include <QUuid>
 #include <QtConcurrent>
 #include <utility>
@@ -41,10 +46,12 @@ struct DownloadManager::Job {
   QHash<QString, qint64> completedPaths;
   QSet<QString> completedUrls;
   QSet<QString> expectedPaths;
+  QSet<QString> resolvingHosts;
   qint64 completedBytes = 0;
   qint64 totalBytes = 0;
   int completedResources = 0;
   int totalResources = 0;
+  int pendingResolutions = 0;
   bool paused = false;
   bool cancelled = false;
 };
@@ -57,6 +64,13 @@ QByteArray hashFile(const QString &path) {
   QCryptographicHash hash(QCryptographicHash::Sha256);
   while (!file.atEnd()) hash.addData(file.read(1024 * 1024));
   return hash.result();
+}
+
+bool needsPublicResolution(const QString &host) {
+  const auto normalized = host.toLower();
+  return normalized.endsWith(QStringLiteral(".tiktokcdn.com")) ||
+         normalized.endsWith(QStringLiteral(".byteoversea.com")) ||
+         normalized.endsWith(QStringLiteral(".ibyteimg.com"));
 }
 
 }
@@ -145,6 +159,10 @@ QString DownloadManager::enqueue(const QVariantMap &episode, const QVariantMap &
   job->record.insert(QStringLiteral("mediaUrl"), media.toString(QUrl::FullyEncoded));
   job->record.insert(QStringLiteral("headers"), job->headers);
   job->record.insert(QStringLiteral("subtitles"), stream.value(QStringLiteral("subtitles")));
+  job->record.insert(QStringLiteral("introStart"), stream.value(QStringLiteral("introStart")));
+  job->record.insert(QStringLiteral("introEnd"), stream.value(QStringLiteral("introEnd")));
+  job->record.insert(QStringLiteral("outroStart"), stream.value(QStringLiteral("outroStart")));
+  job->record.insert(QStringLiteral("outroEnd"), stream.value(QStringLiteral("outroEnd")));
   job->record.insert(QStringLiteral("referer"), stream.value(QStringLiteral("referer")));
   job->record.insert(QStringLiteral("rootPath"), job->root);
   job->record.insert(QStringLiteral("state"), QStringLiteral("queued"));
@@ -229,23 +247,36 @@ void DownloadManager::prepareMediaManifest(Job *job, const QByteArray &body, con
     queueResource(job, {entry.url, relative, {}, entry.kind});
   }
   const auto supplemental = job->record.value(QStringLiteral("subtitles")).toList();
+  QVariantList storedSubtitles;
+  QList<QPair<QString, QUrl>> offlineSubtitles;
   for (const auto &subtitleValue : supplemental) {
-    const auto subtitle = subtitleValue.toMap();
+    auto subtitle = subtitleValue.toMap();
     const QUrl subtitleUrl(subtitle.value(QStringLiteral("url"), subtitle.value(QStringLiteral("file"))).toString());
     if (subtitleUrl.isValid()) {
       const auto relative = localResource(job, subtitleUrl);
       queueResource(job, {subtitleUrl, relative, {}, HlsTools::looksLikePlaylist({}, subtitleUrl) ? QStringLiteral("playlist") : QStringLiteral("subtitle")});
+      subtitle.insert(QStringLiteral("localPath"), relative);
+      storedSubtitles.append(subtitle);
+      offlineSubtitles.append({subtitle.value(QStringLiteral("label"), QStringLiteral("Captions")).toString(), QUrl(relative)});
     }
   }
+  job->record.insert(QStringLiteral("subtitles"), storedSubtitles);
   const QUrl artwork(job->record.value(QStringLiteral("animeImage")).toString());
   if (artwork.isValid()) {
     const auto relative = QStringLiteral("artwork.%1").arg(QFileInfo(artwork.path()).suffix().isEmpty() ? QStringLiteral("jpg") : QFileInfo(artwork.path()).suffix());
     queueResource(job, {artwork, relative, {}, QStringLiteral("artwork")});
   }
   const auto rewritten = HlsTools::rewrite(body, url, [job, this](const QUrl &remote) { return QUrl(localResource(job, remote)); });
-  QSaveFile file(job->root + QStringLiteral("/offline.m3u8"));
-  if (!file.open(QIODevice::WriteOnly) || file.write(rewritten) != rewritten.size() || !file.commit()) { fail(job, file.errorString()); return; }
-  update(job, QStringLiteral("downloading")); pump(job);
+  QSaveFile mediaFile(job->root + QStringLiteral("/media.m3u8"));
+  if (!mediaFile.open(QIODevice::WriteOnly) || mediaFile.write(rewritten) != rewritten.size() || !mediaFile.commit()) { fail(job, mediaFile.errorString()); return; }
+  const auto offlineMaster = HlsTools::makeOfflineMaster(QUrl(QStringLiteral("media.m3u8")), offlineSubtitles);
+  QSaveFile masterFile(job->root + QStringLiteral("/offline.m3u8"));
+  if (!masterFile.open(QIODevice::WriteOnly) || masterFile.write(offlineMaster) != offlineMaster.size() || !masterFile.commit()) { fail(job, masterFile.errorString()); return; }
+  QString metadataError;
+  if (!m_database->upsertDownload(job->record, &metadataError)) { fail(job, metadataError); return; }
+  resolveDownloadHosts(job);
+  update(job, job->pendingResolutions > 0 ? QStringLiteral("preparing") : QStringLiteral("downloading"));
+  pump(job);
 }
 
 bool DownloadManager::queueResource(Job *job, const Resource &resource) {
@@ -264,7 +295,7 @@ bool DownloadManager::queueResource(Job *job, const Resource &resource) {
 }
 
 void DownloadManager::pump(Job *job) {
-  if (job->paused || job->cancelled) return;
+  if (job->paused || job->cancelled || job->pendingResolutions > 0) return;
   while (job->active.size() < ConcurrentResources && !job->queued.isEmpty()) fetchResource(job, job->queued.takeFirst());
   if (job->active.isEmpty() && job->queued.isEmpty()) {
     update(job, QStringLiteral("validating"));
@@ -289,14 +320,64 @@ void DownloadManager::fetchResource(Job *job, const Resource &resource) {
                                 HlsTools::looksLikePlaylist({}, resource.url);
   if (!resource.byteRange.isEmpty() || playlistResource) QFile::remove(partPath);
   const auto existing = QFileInfo(partPath).size();
-  QNetworkRequest request(resource.url); request.setTransferTimeout(45'000);
+  auto routedUrl = resource.url;
+  const auto publicAddress = m_publicAddresses.value(resource.url.host());
+  if (!publicAddress.isEmpty()) routedUrl.setHost(publicAddress);
+  QNetworkRequest request(routedUrl); request.setTransferTimeout(45'000);
   request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
   for (auto it = job->headers.cbegin(); it != job->headers.cend(); ++it) request.setRawHeader(it.key().toUtf8(), it.value().toString().toUtf8());
+  if (!publicAddress.isEmpty()) {
+    request.setPeerVerifyName(resource.url.host());
+    request.setRawHeader(QByteArrayLiteral("Host"), resource.url.host().toUtf8());
+  }
+  request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("*/*"));
+  request.setRawHeader(QByteArrayLiteral("Accept-Encoding"), QByteArrayLiteral("identity"));
   if (!resource.byteRange.isEmpty()) request.setRawHeader(QByteArrayLiteral("Range"), QByteArrayLiteral("bytes=") + resource.byteRange.toUtf8());
   else if (existing > 0) request.setRawHeader(QByteArrayLiteral("Range"), QByteArrayLiteral("bytes=") + QByteArray::number(existing) + QByteArrayLiteral("-"));
   auto *reply = m_network.get(request); job->active.insert(reply, resource);
   connect(reply, &QNetworkReply::readyRead, this, [this, job, reply] { writeResourceData(job, reply); });
   connect(reply, &QNetworkReply::finished, this, [this, job, reply] { finishResource(job, reply); });
+}
+
+void DownloadManager::resolveDownloadHosts(Job *job) {
+  QSet<QString> hosts;
+  for (const auto &resource : std::as_const(job->queued)) {
+    if (needsPublicResolution(resource.url.host()) && !m_publicAddresses.contains(resource.url.host()) &&
+        !job->resolvingHosts.contains(resource.url.host())) hosts.insert(resource.url.host());
+  }
+  for (const auto &host : hosts) {
+    job->resolvingHosts.insert(host); ++job->pendingResolutions;
+    QUrl url(QStringLiteral("https://cloudflare-dns.com/dns-query"));
+    QUrlQuery query; query.addQueryItem(QStringLiteral("name"), host); query.addQueryItem(QStringLiteral("type"), QStringLiteral("A"));
+    url.setQuery(query);
+    QNetworkRequest request(url); request.setTransferTimeout(8'000);
+    request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/dns-json"));
+    request.setRawHeader(QByteArrayLiteral("User-Agent"), QByteArrayLiteral("AniCloudDesktop/4.0"));
+    auto *reply = m_network.get(request);
+    const auto jobId = job->id;
+    connect(reply, &QNetworkReply::finished, this, [this, reply, host, jobId] {
+      QString address;
+      const auto root = QJsonDocument::fromJson(reply->readAll()).object();
+      if (reply->error() == QNetworkReply::NoError) {
+        for (const auto &value : root.value(QStringLiteral("Answer")).toArray()) {
+          const auto answer = value.toObject();
+          QHostAddress candidate(answer.value(QStringLiteral("data")).toString());
+          if (answer.value(QStringLiteral("type")).toInt() == 1 && candidate.protocol() == QAbstractSocket::IPv4Protocol) {
+            address = candidate.toString(); break;
+          }
+        }
+      }
+      if (!address.isEmpty()) m_publicAddresses.insert(host, address);
+      reply->deleteLater();
+      auto *activeJob = jobFor(jobId);
+      if (!activeJob) return;
+      activeJob->resolvingHosts.remove(host);
+      activeJob->pendingResolutions = qMax(0, activeJob->pendingResolutions - 1);
+      if (activeJob->pendingResolutions == 0 && !activeJob->paused && !activeJob->cancelled) {
+        update(activeJob, QStringLiteral("downloading")); pump(activeJob);
+      }
+    });
+  }
 }
 
 void DownloadManager::writeResourceData(Job *job, QNetworkReply *reply) {
@@ -364,6 +445,7 @@ void DownloadManager::finishResource(Job *job, QNetworkReply *reply) {
       const auto message = rewritten.errorString(); rewritten.close(); reply->deleteLater(); fail(job, message); return;
     }
     rewritten.flush(); rewritten.close();
+    resolveDownloadHosts(job);
   }
   QFile::remove(finalPath);
   if (!QFile::rename(partPath, finalPath)) { reply->deleteLater(); fail(job, QStringLiteral("Unable to complete a download resource.")); return; }

@@ -51,24 +51,31 @@ Rectangle {
                 model: root.entries
                 delegate: Button {
                     required property var modelData
+                    readonly property bool selected: root.currentRoute.startsWith(modelData.route)
                     Layout.fillWidth: true; implicitHeight: 50
                     focusPolicy: Qt.TabFocus
                     Accessible.name: modelData.label
                     Accessible.description: "Open " + modelData.label
-                    contentItem: RowLayout {
-                        spacing: 4
-                        Item {
-                            Layout.preferredWidth: 50; Layout.fillHeight: true
+                    contentItem: Item {
+                        Rectangle {
+                            id: iconTile
+                            x: root.expanded ? 7 : (parent.width - width) / 2
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 36; height: 36; radius: 11
+                            color: parent.parent.selected ? "#28E50914" : "transparent"
+                            border.width: parent.parent.selected ? 1 : 0
+                            border.color: Theme.red
                             Image {
-                                anchors.centerIn: parent; width: 22; height: 22
+                                anchors.centerIn: parent; width: 21; height: 21
                                 source: Qt.resolvedUrl("../../resources/icons/" + modelData.icon + ".svg")
                                 sourceSize.width: 24; sourceSize.height: 24
-                                opacity: root.currentRoute.startsWith(modelData.route) ? 1 : 0.62
+                                opacity: parent.parent.parent.selected ? 1 : 0.62
                             }
                         }
                         Text {
-                            Layout.fillWidth: true; text: modelData.label
-                            color: root.currentRoute.startsWith(modelData.route) ? Theme.text : Theme.muted
+                            anchors.left: iconTile.right; anchors.leftMargin: 10; anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter; text: modelData.label
+                            color: parent.parent.selected ? Theme.text : Theme.muted
                             font.pixelSize: 14; font.weight: Font.DemiBold
                             opacity: root.expanded ? 1 : 0; visible: opacity > 0
                             Behavior on opacity { NumberAnimation { duration: 120 } }
@@ -76,12 +83,7 @@ Rectangle {
                     }
                     background: Rectangle {
                         radius: Theme.radius
-                        color: root.currentRoute.startsWith(modelData.route) ? Theme.raised : (parent.hovered ? Theme.surface : "transparent")
-                        Rectangle {
-                            anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                            width: 3; height: 22; radius: 2; color: Theme.red
-                            visible: root.currentRoute.startsWith(modelData.route)
-                        }
+                        color: parent.selected && root.expanded ? Theme.raised : (parent.hovered ? Theme.surface : "transparent")
                     }
                     ToolTip.visible: hovered && !root.expanded
                     ToolTip.text: modelData.label
@@ -92,29 +94,34 @@ Rectangle {
             Item { Layout.fillHeight: true }
 
             Button {
+                readonly property bool selected: root.currentRoute === "notifications"
                 Layout.fillWidth: true; implicitHeight: 50
                 focusPolicy: Qt.TabFocus
                 Accessible.name: "Notifications"
-                contentItem: RowLayout {
-                    spacing: 4
-                    Item {
-                        Layout.preferredWidth: 50; Layout.fillHeight: true
+                contentItem: Item {
+                    Rectangle {
+                        id: notificationTile
+                        x: root.expanded ? 7 : (parent.width - width) / 2
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 36; height: 36; radius: 11
+                        color: parent.parent.selected ? "#28E50914" : "transparent"
+                        border.width: parent.parent.selected ? 1 : 0; border.color: Theme.red
                         Image {
                             anchors.centerIn: parent; width: 22; height: 22
                             source: Qt.resolvedUrl("../../resources/icons/notification.svg")
                             sourceSize.width: 24; sourceSize.height: 24
-                            opacity: root.currentRoute === "notifications" ? 1 : 0.62
+                            opacity: parent.parent.parent.selected ? 1 : 0.62
                         }
                         Rectangle {
-                            anchors.right: parent.right; anchors.rightMargin: 8
-                            anchors.top: parent.top; anchors.topMargin: 10
+                            anchors.right: parent.right; anchors.top: parent.top
                             width: 7; height: 7; radius: 4; color: Theme.red
                             visible: Account.broadcasts.some(item => !item.read)
                         }
                     }
                     Text {
-                        Layout.fillWidth: true; text: "Notifications"
-                        color: root.currentRoute === "notifications" ? Theme.text : Theme.muted
+                        anchors.left: notificationTile.right; anchors.leftMargin: 10; anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter; text: "Notifications"
+                        color: parent.parent.selected ? Theme.text : Theme.muted
                         font.pixelSize: 14; font.weight: Font.DemiBold
                         opacity: root.expanded ? 1 : 0; visible: opacity > 0
                         Behavior on opacity { NumberAnimation { duration: 120 } }
@@ -122,12 +129,7 @@ Rectangle {
                 }
                 background: Rectangle {
                     radius: Theme.radius
-                    color: root.currentRoute === "notifications" ? Theme.raised : (parent.hovered ? Theme.surface : "transparent")
-                    Rectangle {
-                        anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                        width: 3; height: 22; radius: 2; color: Theme.red
-                        visible: root.currentRoute === "notifications"
-                    }
+                    color: parent.selected && root.expanded ? Theme.raised : (parent.hovered ? Theme.surface : "transparent")
                 }
                 ToolTip.visible: hovered && !root.expanded
                 ToolTip.text: "Notifications"
@@ -153,6 +155,11 @@ Rectangle {
                             anchors.horizontalCenter: parent.horizontalCenter; width: 20; height: 20
                             source: Qt.resolvedUrl("../../resources/icons/" + modelData.icon + ".svg")
                             opacity: root.currentRoute.startsWith(modelData.route) ? 1 : 0.58
+                        }
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: 18; height: 2; radius: 1; color: Theme.red
+                            visible: root.currentRoute.startsWith(modelData.route)
                         }
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label

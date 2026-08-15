@@ -19,7 +19,9 @@ class PlayerController final : public QObject {
   Q_PROPERTY(qint64 position READ position NOTIFY positionChanged)
   Q_PROPERTY(qint64 duration READ duration NOTIFY durationChanged)
   Q_PROPERTY(double volume READ volume WRITE setVolume NOTIFY volumeChanged)
+  Q_PROPERTY(double volumeBoost READ volumeBoost WRITE setVolumeBoost NOTIFY volumeBoostChanged)
   Q_PROPERTY(double speed READ speed WRITE setSpeed NOTIFY speedChanged)
+  Q_PROPERTY(double bufferProgress READ bufferProgress NOTIFY bufferProgressChanged)
   Q_PROPERTY(QString quality READ quality WRITE setQuality NOTIFY qualityChanged)
   Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY mutedChanged)
   Q_PROPERTY(bool playing READ playing NOTIFY stateChanged)
@@ -38,8 +40,10 @@ public:
   [[nodiscard]] QString error() const { return m_error; }
   [[nodiscard]] qint64 position() const { return m_player.position(); }
   [[nodiscard]] qint64 duration() const { return m_player.duration(); }
-  [[nodiscard]] double volume() const { return m_audio.volume(); }
+  [[nodiscard]] double volume() const { return m_volume; }
+  [[nodiscard]] double volumeBoost() const { return m_volumeBoost; }
   [[nodiscard]] double speed() const { return m_player.playbackRate(); }
+  [[nodiscard]] double bufferProgress() const { return m_player.bufferProgress(); }
   [[nodiscard]] QString quality() const { return m_quality; }
   [[nodiscard]] bool muted() const { return m_audio.isMuted(); }
   [[nodiscard]] bool playing() const { return m_player.playbackState() == QMediaPlayer::PlayingState; }
@@ -61,6 +65,8 @@ public:
   Q_INVOKABLE void seekBy(qint64 deltaMilliseconds);
   Q_INVOKABLE void setVolume(double volume);
   Q_INVOKABLE void adjustVolume(double delta);
+  Q_INVOKABLE void setVolumeBoost(double boost);
+  Q_INVOKABLE void cycleVolumeBoost();
   Q_INVOKABLE void setSpeed(double speed);
   Q_INVOKABLE void setQuality(const QString &quality);
   Q_INVOKABLE void setMuted(bool muted);
@@ -81,7 +87,9 @@ signals:
   void positionChanged();
   void durationChanged();
   void volumeChanged();
+  void volumeBoostChanged();
   void speedChanged();
+  void bufferProgressChanged();
   void qualityChanged();
   void mutedChanged();
   void captionsChanged();
@@ -97,6 +105,7 @@ private:
   void setState(const QString &state);
   void setError(const QString &error);
   void refreshTracks();
+  void applyAudioGain();
 
   ProviderClient *m_provider = nullptr;
   AccountClient *m_account = nullptr;
@@ -115,10 +124,13 @@ private:
   QString m_quality = QStringLiteral("auto");
   QString m_sessionId;
   qint64 m_restorePosition = 0;
+  qint64 m_lastProgressPosition = 0;
   bool m_restorePlaying = true;
   double m_restoreSpeed = 1.0;
   int m_restoreCaptionIndex = -1;
   bool m_captionsEnabled = true;
+  double m_volume = 0.8;
+  double m_volumeBoost = 1.0;
   int m_generation = 0;
   int m_alternateIndex = -1;
   int m_bufferRetries = 0;
