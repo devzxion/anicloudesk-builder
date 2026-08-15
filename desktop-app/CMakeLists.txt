@@ -177,6 +177,13 @@ qt_generate_deploy_qml_app_script(
   TARGET AniCloud
   OUTPUT_SCRIPT ANICLOUD_QT_DEPLOY_SCRIPT
   NO_UNSUPPORTED_PLATFORM_ERROR
+  EXCLUDE_PLUGINS
+    qsqlibase
+    qsqlmimer
+    qsqlmysql
+    qsqloci
+    qsqlodbc
+    qsqlpsql
 )
 install(SCRIPT ${ANICLOUD_QT_DEPLOY_SCRIPT})
 
