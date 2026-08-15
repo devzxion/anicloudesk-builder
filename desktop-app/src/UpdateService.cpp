@@ -46,8 +46,8 @@ int UpdateService::compareVersions(const QString &left, const QString &right) {
 }
 
 QByteArray UpdateService::decodeSignature(const QByteArray &signature) {
+  if (signature.size() == crypto_sign_BYTES) return signature;
   const auto trimmed = signature.trimmed();
-  if (trimmed.size() == crypto_sign_BYTES) return trimmed;
   const auto hex = QByteArray::fromHex(trimmed); if (hex.size() == crypto_sign_BYTES) return hex;
   return QByteArray::fromBase64(trimmed);
 }

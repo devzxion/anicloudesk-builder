@@ -19,7 +19,7 @@ concurrency:
 
 env:
   QT_VERSION: "6.10.3"
-  VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
+  ANICLOUD_VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
 
 jobs:
   verify:
@@ -111,16 +111,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git clone https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
-          git -C "$VCPKG_ROOT" checkout e55144c5a465b53bc71bd0b59111ea0b8bb039a5
-          if [[ "$RUNNER_OS" == "Windows" ]]; then "$VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics; else "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics; fi
+          git clone https://github.com/microsoft/vcpkg.git "$ANICLOUD_VCPKG_ROOT"
+          git -C "$ANICLOUD_VCPKG_ROOT" checkout e55144c5a465b53bc71bd0b59111ea0b8bb039a5
+          if [[ "$RUNNER_OS" == "Windows" ]]; then "$ANICLOUD_VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics; else "$ANICLOUD_VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics; fi
       - name: Configure Windows build with MSVC
         if: matrix.platform == 'windows'
         shell: pwsh
         run: |
           cmake -S desktop-app -B desktop-app/out/release -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
-            "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            "-DCMAKE_TOOLCHAIN_FILE=$env:ANICLOUD_VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
             "-DANICLOUD_UPDATE_PUBLIC_KEY_HEX=${{ needs.verify.outputs.update_public_key }}"
       - name: Configure Unix build
         if: matrix.platform != 'windows'
@@ -128,7 +128,7 @@ jobs:
         run: >-
           cmake -S desktop-app -B desktop-app/out/release -G Ninja
           -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DCMAKE_TOOLCHAIN_FILE="$ANICLOUD_VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
           -DANICLOUD_UPDATE_PUBLIC_KEY_HEX=${{ needs.verify.outputs.update_public_key }}
       - name: Build and test on Windows
         if: matrix.platform == 'windows'
