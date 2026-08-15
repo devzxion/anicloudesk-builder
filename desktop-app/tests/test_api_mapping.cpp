@@ -41,7 +41,10 @@ private slots:
         QJsonObject{{QStringLiteral("file"), QStringLiteral("https://cdn.example/720.m3u8")}, {QStringLiteral("label"), QStringLiteral("720p")}},
         QJsonObject{{QStringLiteral("file"), QStringLiteral("https://cdn.example/master.m3u8")}, {QStringLiteral("label"), QStringLiteral("Auto")}},
       }},
-      {QStringLiteral("tracks"), QJsonArray{QJsonObject{{QStringLiteral("file"), QStringLiteral("https://cdn.example/en.vtt")}, {QStringLiteral("kind"), QStringLiteral("captions")}, {QStringLiteral("label"), QStringLiteral("English")}}}},
+      {QStringLiteral("tracks"), QJsonArray{
+        QJsonObject{{QStringLiteral("file"), QStringLiteral("https://cdn.example/en.vtt")}, {QStringLiteral("kind"), QStringLiteral("captions")}, {QStringLiteral("label"), QStringLiteral("English")}},
+        QJsonObject{{QStringLiteral("kind"), QStringLiteral("captions")}, {QStringLiteral("label"), QStringLiteral("Broken")}},
+      }},
       {QStringLiteral("intro"), QJsonObject{{QStringLiteral("start"), 4}, {QStringLiteral("end"), 89}}},
       {QStringLiteral("outro"), QJsonObject{{QStringLiteral("start"), 1300}, {QStringLiteral("end"), 1360}}},
     }}}}};

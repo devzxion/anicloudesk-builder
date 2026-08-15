@@ -17,6 +17,8 @@ private slots:
     QVERIFY(navigation.readAll().contains("Accessible.name"));
     const auto playerSource = player.readAll();
     for (const auto *shortcut : {"Space", "Left", "Right", "Up", "Down", "M", "C", "Escape"}) QVERIFY2(playerSource.contains(shortcut), shortcut);
+    QVERIFY(playerSource.contains("canSkipIntro"));
+    QVERIFY(playerSource.contains("canSkipOutro"));
   }
 
   void shellBrandingAndNavigationMatchDesktopDesign() {
@@ -30,6 +32,7 @@ private slots:
     QVERIFY(!navigationSource.contains("text: \"ANICLOUD\""));
     QVERIFY(navigationSource.contains("hover.hovered"));
     QVERIFY(navigationSource.contains("navigationFocus.activeFocus"));
+    QVERIFY(navigationSource.contains("routeSelected"));
     QVERIFY(navigationSource.contains("Notifications"));
   }
 

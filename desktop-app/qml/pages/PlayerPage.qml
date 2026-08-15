@@ -12,6 +12,8 @@ Rectangle {
     property bool scrubbing: false
     readonly property bool compact: width < 920
     readonly property bool initialBuffering: (Player.state === "loading" || Player.state === "resolving" || Player.state === "buffering") && Player.position < 500
+    readonly property bool canSkipIntro: Player.introEnd > Player.introStart && Player.position >= Player.introStart && Player.position < Player.introEnd
+    readonly property bool canSkipOutro: Player.outroEnd > Player.outroStart && Player.position >= Player.outroStart && Player.position < Player.outroEnd
     signal toggleFullscreenRequested()
     signal escapeRequested()
 
@@ -99,13 +101,13 @@ Rectangle {
     Row {
         anchors.right: parent.right; anchors.bottom: bottomShade.top
         anchors.rightMargin: 34; anchors.bottomMargin: 10; spacing: 10; z: 5
-        visible: root.controlsVisible
+        visible: root.canSkipIntro || root.canSkipOutro
         AppButton {
-            visible: Player.introEnd > Player.introStart && Player.position >= Player.introStart && Player.position < Player.introEnd
+            visible: root.canSkipIntro
             text: "Skip intro"; compact: true; onClicked: Player.skipIntro()
         }
         AppButton {
-            visible: Player.outroEnd > Player.outroStart && Player.position >= Player.outroStart && Player.position < Player.outroEnd
+            visible: root.canSkipOutro
             text: "Skip outro"; compact: true; onClicked: Player.skipOutro()
         }
     }

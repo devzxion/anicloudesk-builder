@@ -645,8 +645,10 @@ QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &ep
     const auto track = trackValue.toObject();
     const auto kind = track.value(QStringLiteral("kind")).toString().toLower();
     if (!kind.isEmpty() && kind != QStringLiteral("captions") && kind != QStringLiteral("subtitles")) continue;
+    const auto url = firstString(track, {"file", "url", "src"});
+    if (url.isEmpty()) continue;
     QVariantMap item = track.toVariantMap();
-    item.insert(QStringLiteral("url"), firstString(track, {"file", "url", "src"}));
+    item.insert(QStringLiteral("url"), url);
     subtitles.append(item);
   }
   result.insert(QStringLiteral("subtitles"), subtitles);

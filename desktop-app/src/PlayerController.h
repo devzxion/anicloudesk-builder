@@ -104,6 +104,7 @@ private:
   void saveProgress();
   void setState(const QString &state);
   void setError(const QString &error);
+  void scheduleFailure(const QString &message);
   void refreshTracks();
   void applyAudioGain();
 
@@ -135,4 +136,6 @@ private:
   int m_alternateIndex = -1;
   int m_bufferRetries = 0;
   bool m_triedSecondaryServer = false;
+  bool m_failureScheduled = false;
+  QString m_pendingFailure;
 };

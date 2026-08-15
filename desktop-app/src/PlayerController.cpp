@@ -46,10 +46,10 @@ PlayerController::PlayerController(ProviderClient *provider, AccountClient *acco
       refreshTracks();
       if (m_restorePlaying) m_player.play(); else m_player.pause();
     } else if (status == QMediaPlayer::InvalidMedia) {
-      failOrFallback(m_player.errorString());
+      scheduleFailure(m_player.errorString());
     }
   });
-  connect(&m_player, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error, const QString &message) { failOrFallback(message); });
+  connect(&m_player, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error, const QString &message) { scheduleFailure(message); });
   connect(&m_player, &QMediaPlayer::tracksChanged, this, &PlayerController::refreshTracks);
   connect(m_provider, &ProviderClient::streamResolved, this, &PlayerController::applyStream);
   connect(m_provider, &ProviderClient::streamFailed, this, [this](int generation, const QString &message) {
@@ -79,12 +79,35 @@ void PlayerController::setError(const QString &error) {
   if (m_error == error) return; m_error = error; emit errorChanged();
 }
 
+void PlayerController::scheduleFailure(const QString &message) {
+  if (!message.isEmpty()) m_pendingFailure = message;
+  if (m_failureScheduled) return;
+  m_failureScheduled = true;
+  QTimer::singleShot(0, this, [this] {
+    m_failureScheduled = false;
+    if (m_player.mediaStatus() != QMediaPlayer::InvalidMedia && m_player.error() == QMediaPlayer::NoError) {
+      m_pendingFailure.clear();
+      return;
+    }
+    const auto message = m_pendingFailure.isEmpty() ? m_player.errorString() : m_pendingFailure;
+    m_pendingFailure.clear();
+    failOrFallback(message);
+  });
+}
+
 void PlayerController::open(const QVariantMap &episode, qint64 resumeMilliseconds) {
   const auto configuredQuality = QSettings().value(QStringLiteral("playback/quality"), QStringLiteral("auto")).toString().toLower();
   if (configuredQuality != m_quality) { m_quality = configuredQuality; emit qualityChanged(); }
   m_restoreSpeed = speed();
   m_restoreCaptionIndex = m_player.activeSubtitleTrack();
   saveProgress();
+  m_player.stop();
+  m_player.setSource(QUrl{});
+  if (!m_sessionId.isEmpty()) m_gateway->closeSession(m_sessionId);
+  m_sessionId.clear();
+  m_stream.clear();
+  m_captions.clear();
+  emit captionsChanged();
   m_current = episode;
   if (!m_current.contains(QStringLiteral("episodeNumber"))) m_current.insert(QStringLiteral("episodeNumber"), episode.value(QStringLiteral("number")));
   if (!m_current.contains(QStringLiteral("episodeName"))) m_current.insert(QStringLiteral("episodeName"), episode.value(QStringLiteral("title"), QStringLiteral("Episode %1").arg(episode.value(QStringLiteral("number")).toInt())));
@@ -105,6 +128,10 @@ void PlayerController::openOffline(const QVariantMap &download) {
   }
   const auto path = download.value(QStringLiteral("rootPath")).toString() + QStringLiteral("/offline.m3u8");
   if (!QFileInfo::exists(path)) { setError(QStringLiteral("The offline library is missing its playlist.")); setState(QStringLiteral("error")); return; }
+  m_restoreSpeed = speed();
+  m_restoreCaptionIndex = m_player.activeSubtitleTrack();
+  saveProgress();
+  m_player.stop();
   if (!m_sessionId.isEmpty()) m_gateway->closeSession(m_sessionId);
   m_sessionId.clear();
   m_current = download; m_stream = download;
@@ -174,6 +201,9 @@ void PlayerController::failOrFallback(const QString &message) {
     m_restoreSpeed = speed(); m_restoreCaptionIndex = m_player.activeSubtitleTrack();
     resolve(false); return;
   }
+  saveProgress();
+  if (m_restorePosition <= 0) m_restorePosition = position();
+  m_player.stop();
   setError(message.isEmpty() ? QStringLiteral("This episode could not be played.") : message);
   setState(QStringLiteral("error"));
 }
@@ -253,6 +283,7 @@ void PlayerController::close() {
   saveProgress(); m_player.stop(); m_player.setSource(QUrl{});
   if (!m_sessionId.isEmpty()) m_gateway->closeSession(m_sessionId);
   m_sessionId.clear(); m_current.clear(); m_stream.clear(); m_captions.clear();
+  m_pendingFailure.clear(); m_failureScheduled = false;
   setError({}); setState(QStringLiteral("idle")); emit captionsChanged(); emit currentChanged();
 }
 

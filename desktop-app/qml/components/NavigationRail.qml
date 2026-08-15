@@ -11,6 +11,10 @@ Rectangle {
     readonly property real preferredWidth: compact ? parent.width : (expanded ? 224 : 72)
     signal navigate(string route)
 
+    function routeSelected(route) {
+        return currentRoute.startsWith(route) || (route === "discover" && currentRoute.startsWith("details/"))
+    }
+
     color: "#F009090B"
     border.color: Theme.border
     clip: true
@@ -51,7 +55,7 @@ Rectangle {
                 model: root.entries
                 delegate: Button {
                     required property var modelData
-                    readonly property bool selected: root.currentRoute.startsWith(modelData.route)
+                    readonly property bool selected: root.routeSelected(modelData.route)
                     Layout.fillWidth: true; implicitHeight: 50
                     focusPolicy: Qt.TabFocus
                     Accessible.name: modelData.label
@@ -154,16 +158,16 @@ Rectangle {
                         Image {
                             anchors.horizontalCenter: parent.horizontalCenter; width: 20; height: 20
                             source: Qt.resolvedUrl("../../resources/icons/" + modelData.icon + ".svg")
-                            opacity: root.currentRoute.startsWith(modelData.route) ? 1 : 0.58
+                            opacity: root.routeSelected(modelData.route) ? 1 : 0.58
                         }
                         Rectangle {
                             anchors.horizontalCenter: parent.horizontalCenter
                             width: 18; height: 2; radius: 1; color: Theme.red
-                            visible: root.currentRoute.startsWith(modelData.route)
+                            visible: root.routeSelected(modelData.route)
                         }
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter; text: modelData.label
-                            color: root.currentRoute.startsWith(modelData.route) ? Theme.text : Theme.muted
+                            color: root.routeSelected(modelData.route) ? Theme.text : Theme.muted
                             font.pixelSize: 9
                         }
                     }
