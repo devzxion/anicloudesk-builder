@@ -55,13 +55,12 @@ private slots:
   }
 
   void parsesBundledCatalogPagesWithoutAccountApi() {
-    const auto topHtml = QStringLiteral(R"(
-      <tr class="ranking-list">
-        <td><a href="https://myanimelist.net/anime/20/Naruto"><img data-src="https://cdn.myanimelist.net/r/50x70/images/anime/naruto.jpg"></a></td>
-        <td><h3 class="anime_ranking_h3"><a href="https://myanimelist.net/anime/20/Naruto">Naruto</a></h3>
-        <div class="information">TV (220 eps)<br>23 min</div></td>
-        <td><span class="top-anime-rank-text">1</span></td>
-      </tr>)");
+    const auto topHtml = QStringLiteral(
+      "<tr class=\"ranking-list\">"
+      "<td><a href=\"https://myanimelist.net/anime/20/Naruto\"><img data-src=\"https://cdn.myanimelist.net/r/50x70/images/anime/naruto.jpg\"></a></td>"
+      "<td><h3 class=\"anime_ranking_h3\"><a href=\"https://myanimelist.net/anime/20/Naruto\">Naruto</a></h3>"
+      "<div class=\"information\">TV (220 eps)<br>23 min</div></td>"
+      "<td><span class=\"top-anime-rank-text\">1</span></td></tr>");
     const auto top = ProviderClient::parseTopAnimeHtml(topHtml, 10);
     QCOMPARE(top.size(), 1);
     QCOMPARE(top.first().toMap().value(QStringLiteral("id")).toString(), QStringLiteral("20"));
@@ -69,10 +68,10 @@ private slots:
     QCOMPARE(top.first().toMap().value(QStringLiteral("episodes")).toInt(), 220);
     QVERIFY(top.first().toMap().value(QStringLiteral("poster")).toString().contains(QStringLiteral("/images/anime/naruto.jpg")));
 
-    const auto searchHtml = QStringLiteral(R"(
-      <tr><td><a class="hoverinfo_trigger" href="https://myanimelist.net/anime/1735/Naruto__Shippuuden"><img data-src="https://cdn.example/shippuden.jpg"></a></td>
-      <td><a class="hoverinfo_trigger" href="https://myanimelist.net/anime/1735/Naruto__Shippuuden"><strong>Naruto: Shippuuden</strong></a></td>
-      <td>TV</td><td>500</td><td>8.29</td></tr>)");
+    const auto searchHtml = QStringLiteral(
+      "<tr><td><a class=\"hoverinfo_trigger\" href=\"https://myanimelist.net/anime/1735/Naruto__Shippuuden\"><img data-src=\"https://cdn.example/shippuden.jpg\"></a></td>"
+      "<td><a class=\"hoverinfo_trigger\" href=\"https://myanimelist.net/anime/1735/Naruto__Shippuuden\"><strong>Naruto: Shippuuden</strong></a></td>"
+      "<td>TV</td><td>500</td><td>8.29</td></tr>");
     const auto search = ProviderClient::parseSearchHtml(searchHtml, 20);
     QCOMPARE(search.size(), 1);
     QCOMPARE(search.first().toMap().value(QStringLiteral("id")).toString(), QStringLiteral("1735"));
@@ -80,15 +79,15 @@ private slots:
   }
 
   void parsesBundledDetailsAndRecommendations() {
-    const auto html = QStringLiteral(R"(
-      <h1 class="title-name h1_bold_none"><strong>Naruto</strong></h1>
-      <p class="title-english">Naruto</p>
-      <img itemprop="image" data-src="https://cdn.example/naruto.jpg">
-      <p itemprop="description">A young ninja searches for recognition.</p>
-      <div class="spaceit_pad"><span class="dark_text">Type:</span> TV</div>
-      <div class="spaceit_pad"><span class="dark_text">Episodes:</span> 220</div>
-      <div class="spaceit_pad"><span class="dark_text">Status:</span> Finished Airing</div>
-      <section id="anime_recommendation"><a href="https://myanimelist.net/anime/1735/Naruto__Shippuuden">Naruto: Shippuuden</a></section>)");
+    const auto html = QStringLiteral(
+      "<h1 class=\"title-name h1_bold_none\"><strong>Naruto</strong></h1>"
+      "<p class=\"title-english\">Naruto</p>"
+      "<img itemprop=\"image\" data-src=\"https://cdn.example/naruto.jpg\">"
+      "<p itemprop=\"description\">A young ninja searches for recognition.</p>"
+      "<div class=\"spaceit_pad\"><span class=\"dark_text\">Type:</span> TV</div>"
+      "<div class=\"spaceit_pad\"><span class=\"dark_text\">Episodes:</span> 220</div>"
+      "<div class=\"spaceit_pad\"><span class=\"dark_text\">Status:</span> Finished Airing</div>"
+      "<section id=\"anime_recommendation\"><a href=\"https://myanimelist.net/anime/1735/Naruto__Shippuuden\">Naruto: Shippuuden</a></section>");
     QVariantList recommendations;
     const auto details = ProviderClient::parseAnimeDetailsHtml(html, QStringLiteral("20"), &recommendations);
     QCOMPARE(details.value(QStringLiteral("title")).toString(), QStringLiteral("Naruto"));
