@@ -174,6 +174,15 @@ install(TARGETS AniCloud
   BUNDLE DESTINATION .
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+if(WIN32)
+  if(NOT COMMAND x_vcpkg_install_local_dependencies)
+    message(FATAL_ERROR "Windows packaging requires vcpkg install-time runtime dependency deployment")
+  endif()
+  x_vcpkg_install_local_dependencies(
+    TARGETS AniCloud
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+  )
+endif()
 install(FILES THIRD_PARTY_NOTICES.md DESTINATION ${CMAKE_INSTALL_DATADIR}/AniCloud)
 if(UNIX AND NOT APPLE)
   install(FILES resources/linux/ink.anicloud.desktop.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)

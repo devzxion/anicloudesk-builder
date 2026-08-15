@@ -201,9 +201,17 @@ jobs:
           if ($install.ExitCode -ne 0) { throw "AniCloud installer exited with $($install.ExitCode)" }
           $launcher = Join-Path $installRoot 'AniCloud.exe'
           $application = Join-Path $installRoot 'bin\AniCloud.exe'
+          $sodium = Join-Path $installRoot 'bin\libsodium.dll'
           if (-not (Test-Path -LiteralPath $launcher)) { throw 'Installed native launcher is missing' }
           if (-not (Test-Path -LiteralPath $application)) { throw 'Installed native application is missing' }
-          $smoke = Start-Process -FilePath $launcher -ArgumentList '--smoke-test' -Wait -PassThru
+          if (-not (Test-Path -LiteralPath $sodium)) { throw 'Installed libsodium runtime is missing' }
+          $originalPath = $env:PATH
+          try {
+            $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+            $smoke = Start-Process -FilePath $launcher -ArgumentList '--smoke-test' -WorkingDirectory $installRoot -Wait -PassThru
+          } finally {
+            $env:PATH = $originalPath
+          }
           if ($smoke.ExitCode -ne 0) { throw "Installed AniCloud smoke test exited with $($smoke.ExitCode)" }
           $uninstaller = Join-Path $installRoot 'Uninstall AniCloud.exe'
           $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
