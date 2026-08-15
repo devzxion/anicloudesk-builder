@@ -1,0 +1,300 @@
+name: AniCloud Native Desktop Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Release tag
+        required: true
+        default: desktop-v4.0.0
+  push:
+    tags: ["desktop-v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: native-desktop-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  QT_VERSION: "6.11.1"
+  VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      tag: ${{ steps.metadata.outputs.tag }}
+      update_public_key: ${{ steps.update-key.outputs.public_key }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate version and tag
+        id: metadata
+        env:
+          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^project(AniCloudDesktop VERSION \([^ ]*\).*/\1/p' desktop-app/CMakeLists.txt)"
+          [[ -n "$version" ]]
+          [[ "$REQUESTED_TAG" == "desktop-v${version}" ]] || { echo "Expected desktop-v${version}, got $REQUESTED_TAG" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$REQUESTED_TAG" >> "$GITHUB_OUTPUT"
+      - name: Require and derive manifest signing key
+        id: update-key
+        env:
+          UPDATE_ED25519_SECRET_KEY_BASE64: ${{ secrets.UPDATE_ED25519_SECRET_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          [[ -n "$UPDATE_ED25519_SECRET_KEY_BASE64" ]] || { echo "UPDATE_ED25519_SECRET_KEY_BASE64 is required" >&2; exit 1; }
+          python -m pip install --disable-pip-version-check pynacl==1.5.0
+          public_key="$(python desktop-app/scripts/derive_update_public_key.py)"
+          echo "public_key=$public_key" >> "$GITHUB_OUTPUT"
+      - name: Verify browser-free native source policy
+        run: python desktop-app/scripts/check_source_policy.py
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            architecture: x64
+          - os: ubuntu-22.04
+            platform: linux
+            architecture: x64
+          - os: macos-15-intel
+            platform: macos
+            architecture: x64
+          - os: macos-15
+            platform: macos
+            architecture: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-x11-dev libsecret-1-dev libfuse2 patchelf xvfb
+      - name: Install build tools
+        uses: lukka/get-cmake@v4.4.2
+        with:
+          cmakeVersion: "3.31.6"
+          ninjaVersion: "1.12.1"
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4.3.1
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: qtmultimedia qtshadertools
+          cache: true
+      - name: Install Windows packager
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: choco install nsis --yes --no-progress
+      - name: Bootstrap pinned vcpkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
+          git -C "$VCPKG_ROOT" checkout e55144c5a465b53bc71bd0b59111ea0b8bb039a5
+          if [[ "$RUNNER_OS" == "Windows" ]]; then "$VCPKG_ROOT/bootstrap-vcpkg.bat" -disableMetrics; else "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics; fi
+      - name: Require Windows signing credentials
+        if: matrix.platform == 'windows'
+        shell: bash
+        env:
+          CERT: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          PASS: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: test -n "$CERT" && test -n "$PASS"
+      - name: Require Apple signing and notarization credentials
+        if: matrix.platform == 'macos'
+        shell: bash
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          PASS: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          APP_PASS: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: test -n "$CERT" && test -n "$PASS" && test -n "$IDENTITY" && test -n "$APPLE_ID" && test -n "$TEAM" && test -n "$APP_PASS"
+      - name: Configure
+        shell: bash
+        run: >-
+          cmake -S desktop-app -B desktop-app/out/release -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DANICLOUD_UPDATE_PUBLIC_KEY_HEX=${{ needs.verify.outputs.update_public_key }}
+      - name: Build and test
+        shell: bash
+        run: |
+          cmake --build desktop-app/out/release --parallel
+          ctest --test-dir desktop-app/out/release --output-on-failure
+      - name: Install deployable tree
+        shell: bash
+        run: cmake --install desktop-app/out/release --prefix desktop-app/out/stage
+      - name: Smoke test Windows app
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: '& .\desktop-app\out\stage\bin\AniCloud.exe --smoke-test'
+      - name: Smoke test Linux app
+        if: matrix.platform == 'linux'
+        run: xvfb-run -a desktop-app/out/stage/bin/AniCloud --smoke-test
+      - name: Smoke test macOS app
+        if: matrix.platform == 'macos'
+        run: desktop-app/out/stage/AniCloud.app/Contents/MacOS/AniCloud --smoke-test
+      - name: Enforce package policy
+        shell: bash
+        run: python desktop-app/scripts/check_package_policy.py desktop-app/out/stage
+
+      - name: Import Windows certificate and sign executable
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          CERT: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          PASS: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\anicloud.pfx", [Convert]::FromBase64String($env:CERT))
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Filter signtool.exe -Recurse | Sort-Object FullName -Descending | Select-Object -First 1).FullName
+          & $signtool sign /fd SHA256 /f "$env:RUNNER_TEMP\anicloud.pfx" /p $env:PASS /tr http://timestamp.digicert.com /td SHA256 desktop-app\out\stage\bin\AniCloud.exe
+      - name: Package and sign Windows assets
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          PASS: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          New-Item -ItemType Directory -Force desktop-app\out\artifacts | Out-Null
+          $stage = (Resolve-Path desktop-app\out\stage).Path
+          $icon = (Resolve-Path desktop-app\resources\icon.ico).Path
+          $output = (Resolve-Path desktop-app\out\artifacts).Path + "\AniCloud-Setup-$env:VERSION-windows-x64.exe"
+          & makensis.exe "/DSTAGE_DIR=$stage" "/DICON_FILE=$icon" "/DOUTPUT_FILE=$output" desktop-app\packaging\windows\installer.nsi
+          Compress-Archive -Path desktop-app\out\stage\* -DestinationPath "desktop-app\out\artifacts\AniCloud-$env:VERSION-windows-x64-portable.zip"
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Filter signtool.exe -Recurse | Sort-Object FullName -Descending | Select-Object -First 1).FullName
+          & $signtool sign /fd SHA256 /f "$env:RUNNER_TEMP\anicloud.pfx" /p $env:PASS /tr http://timestamp.digicert.com /td SHA256 $output
+
+      - name: Package Linux assets
+        if: matrix.platform == 'linux'
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p desktop-app/out/artifacts desktop-app/out/AppDir/usr/share/applications desktop-app/out/AppDir/usr/share/icons/hicolor/256x256/apps
+          cp -a desktop-app/out/stage/. desktop-app/out/AppDir/usr/
+          cp desktop-app/resources/linux/ink.anicloud.desktop.desktop desktop-app/out/AppDir/usr/share/applications/ink.anicloud.desktop.desktop
+          cp desktop-app/resources/icon.png desktop-app/out/AppDir/usr/share/icons/hicolor/256x256/apps/ink.anicloud.desktop.png
+          cp desktop-app/resources/linux/ink.anicloud.desktop.desktop desktop-app/out/AppDir/ink.anicloud.desktop.desktop
+          cp desktop-app/resources/icon.png desktop-app/out/AppDir/ink.anicloud.desktop.png
+          ln -s usr/bin/AniCloud desktop-app/out/AppDir/AppRun
+          curl -fL -o desktop-app/out/appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x desktop-app/out/appimagetool desktop-app/out/AppDir/AppRun
+          ARCH=x86_64 desktop-app/out/appimagetool desktop-app/out/AppDir "desktop-app/out/artifacts/AniCloud-${VERSION}-linux-x64.AppImage"
+          cpack --config desktop-app/out/release/CPackConfig.cmake -G DEB -B desktop-app/out/cpack
+          deb="$(find desktop-app/out/cpack -maxdepth 1 -name '*.deb' -print -quit)"
+          test -n "$deb"
+          mv "$deb" "desktop-app/out/artifacts/AniCloud-${VERSION}-linux-x64.deb"
+          xvfb-run -a "desktop-app/out/artifacts/AniCloud-${VERSION}-linux-x64.AppImage" --appimage-extract-and-run --smoke-test
+
+      - name: Import Apple Developer ID certificate
+        if: matrix.platform == 'macos'
+        env:
+          CERT: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          PASS: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/anicloud.keychain-db"
+          echo "$CERT" | base64 -D > "$RUNNER_TEMP/anicloud.p12"
+          security create-keychain -p actions "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p actions "$keychain"
+          security import "$RUNNER_TEMP/anicloud.p12" -P "$PASS" -A -t cert -f pkcs12 -k "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions "$keychain"
+      - name: Sign, notarize and staple macOS DMG
+        if: matrix.platform == 'macos'
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          ARCHITECTURE: ${{ matrix.architecture }}
+          IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          APP_PASS: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          app="desktop-app/out/stage/AniCloud.app"
+          codesign --force --deep --options runtime --timestamp --sign "$IDENTITY" "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          mkdir -p desktop-app/out/artifacts desktop-app/out/dmg
+          cp -a "$app" desktop-app/out/dmg/
+          ln -s /Applications desktop-app/out/dmg/Applications
+          dmg="desktop-app/out/artifacts/AniCloud-${VERSION}-macos-${ARCHITECTURE}.dmg"
+          hdiutil create -volname AniCloud -srcfolder desktop-app/out/dmg -ov -format UDZO "$dmg"
+          codesign --force --timestamp --sign "$IDENTITY" "$dmg"
+          xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --team-id "$TEAM" --password "$APP_PASS" --wait
+          xcrun stapler staple "$dmg"
+          mount_point="$RUNNER_TEMP/anicloud-dmg"
+          mkdir -p "$mount_point"
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_point"
+          "$mount_point/AniCloud.app/Contents/MacOS/AniCloud" --smoke-test
+          hdiutil detach "$mount_point"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform }}-${{ matrix.architecture }}
+          path: desktop-app/out/artifacts/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [verify, build]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: release-assets
+          merge-multiple: true
+      - name: Validate assets and create detached signed manifest
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          TAG: ${{ needs.verify.outputs.tag }}
+          UPDATE_ED25519_SECRET_KEY_BASE64: ${{ secrets.UPDATE_ED25519_SECRET_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          expected=(
+            "AniCloud-Setup-${VERSION}-windows-x64.exe"
+            "AniCloud-${VERSION}-windows-x64-portable.zip"
+            "AniCloud-${VERSION}-linux-x64.AppImage"
+            "AniCloud-${VERSION}-linux-x64.deb"
+            "AniCloud-${VERSION}-macos-x64.dmg"
+            "AniCloud-${VERSION}-macos-arm64.dmg"
+          )
+          for asset in "${expected[@]}"; do test -f "release-assets/$asset"; done
+          test "$(find release-assets -maxdepth 1 -type f | wc -l)" -eq "${#expected[@]}"
+          python -m pip install --disable-pip-version-check pynacl==1.5.0
+          python desktop-app/scripts/generate_release_manifest.py \
+            --assets release-assets --version "$VERSION" \
+            --base-url "https://github.com/devz-on/anicloudesk-builder/releases/download/${TAG}" \
+            --secret-key-base64 "$UPDATE_ED25519_SECRET_KEY_BASE64" \
+            --output release-assets/desktop-release-manifest.json
+          (cd release-assets && sha256sum "${expected[@]}" > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AniCloud-${{ needs.verify.outputs.version }}-native-desktop-release
+          path: release-assets/*
+          if-no-files-found: error
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2.6.2
+        with:
+          tag_name: ${{ needs.verify.outputs.tag }}
+          name: AniCloud Native Desktop ${{ needs.verify.outputs.version }}
+          files: release-assets/*
+          fail_on_unmatched_files: true

@@ -1,0 +1,10 @@
+.vcpkg/
+release-assets/
+desktop-app/out/
+desktop-app/vcpkg_installed/
+desktop-app/release/
+desktop-app/.qt/
+*.user
+*.log
+__pycache__/
+*.py[cod]

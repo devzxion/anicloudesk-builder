@@ -1,0 +1,32 @@
+# AniCloud Native Desktop 4.0
+
+This is the official native Windows, macOS, and Linux client. It is a C++20/Qt Quick application; it does not load or package the AniCloud website.
+
+## Reproducible toolchain
+
+- CMake 3.28+
+- Ninja 1.11+
+- Qt 6.11.1 with Qt Declarative, Qt Multimedia, and its FFmpeg backend
+- MSVC 2022 on Windows, Apple Clang/Xcode 16 on macOS, or GCC 12+ on Ubuntu 22.04-class Linux
+- vcpkg at baseline `e55144c5a465b53bc71bd0b59111ea0b8bb039a5` (libsodium 1.0.22)
+- QtKeychain 0.17.0, fetched and pinned by CMake
+
+Install Qt with the platform maintenance tool or `aqtinstall`, set `CMAKE_PREFIX_PATH` to the Qt kit and `VCPKG_ROOT` to a bootstrapped vcpkg checkout, then run:
+
+```sh
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+```
+
+Release builds must pass a non-empty `ANICLOUD_UPDATE_PUBLIC_KEY_HEX`:
+
+```sh
+cmake --preset release -DANICLOUD_UPDATE_PUBLIC_KEY_HEX=<64-hex-character-ed25519-public-key>
+cmake --build --preset release
+cmake --install out/build/release --prefix out/stage
+```
+
+The native data root is deliberately versioned as `native-v1`; no Electron token, preference, history, or downloaded file is imported or deleted.
+
+See [RELEASING.md](RELEASING.md) for signed package and manifest requirements.

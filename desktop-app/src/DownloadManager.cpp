@@ -1,0 +1,480 @@
+#include "DownloadManager.h"
+
+#include "ApiClient.h"
+#include "Database.h"
+#include "HlsTools.h"
+
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QFutureWatcher>
+#include <QJsonDocument>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QNetworkInformation>
+#include <QSaveFile>
+#include <QSettings>
+#include <QSet>
+#include <QStorageInfo>
+#include <QUuid>
+#include <QtConcurrent>
+#include <utility>
+
+struct DownloadManager::Resource {
+  QUrl url;
+  QString relativePath;
+  QString byteRange;
+  QString kind;
+};
+
+struct DownloadManager::Job {
+  QString id;
+  QVariantMap record;
+  QVariantMap headers;
+  QString root;
+  int preferredHeight = 1080;
+  QList<Resource> queued;
+  QHash<QNetworkReply *, Resource> active;
+  QHash<QNetworkReply *, QFile *> writers;
+  QHash<QString, QString> paths;
+  QHash<QString, qint64> completedPaths;
+  QSet<QString> completedUrls;
+  QSet<QString> expectedPaths;
+  qint64 completedBytes = 0;
+  qint64 totalBytes = 0;
+  int completedResources = 0;
+  int totalResources = 0;
+  bool paused = false;
+  bool cancelled = false;
+};
+
+namespace {
+constexpr int ConcurrentResources = 3;
+
+QByteArray hashFile(const QString &path) {
+  QFile file(path); if (!file.open(QIODevice::ReadOnly)) return {};
+  QCryptographicHash hash(QCryptographicHash::Sha256);
+  while (!file.atEnd()) hash.addData(file.read(1024 * 1024));
+  return hash.result();
+}
+
+}
+
+DownloadManager::DownloadManager(Database *database, AccountClient *account, ProviderClient *provider, QObject *parent)
+  : QObject(parent), m_database(database), m_account(account), m_provider(provider) {
+  QSettings settings;
+  m_storageRoot = settings.value(QStringLiteral("downloads/storageRoot"), database->libraryRoot()).toString();
+  QDir().mkpath(m_storageRoot);
+  connect(m_provider, &ProviderClient::streamResolved, this, [this](int generation, const QVariantMap &stream) {
+    if (!m_pendingEpisodes.contains(generation)) return;
+    const auto episode = m_pendingEpisodes.take(generation);
+    enqueue(episode, stream, episode.value(QStringLiteral("preferredHeight"), 1080).toInt());
+  });
+  connect(m_provider, &ProviderClient::streamFailed, this, [this](int generation, const QString &message) {
+    if (m_pendingEpisodes.remove(generation) > 0) setError(message);
+  });
+  connect(m_account, &AccountClient::authenticationChanged, this, [this] {
+    if (!m_account->authenticated()) {
+      const auto ids = m_jobs.keys();
+      for (const auto &id : ids) pause(id);
+      m_pendingEpisodes.clear();
+    }
+    reload();
+  });
+  reload();
+}
+
+DownloadManager::~DownloadManager() {
+  for (auto *job : std::as_const(m_jobs)) {
+    for (auto *reply : job->active.keys()) {
+      QObject::disconnect(reply, nullptr, this, nullptr);
+      closeResourceWriter(job, reply);
+      reply->abort();
+    }
+    delete job;
+  }
+}
+
+void DownloadManager::setError(const QString &error) { if (m_error == error) return; m_error = error; emit errorChanged(); }
+
+void DownloadManager::reload() {
+  const auto owner = m_account->user().value(QStringLiteral("id")).toString();
+  if (owner.isEmpty()) {
+    m_items.clear(); emit itemsChanged(); return;
+  }
+  auto records = m_database->downloads(owner);
+  bool recoveredInterruptedJob = false;
+  for (const auto &value : records) {
+    const auto record = value.toMap();
+    const auto id = record.value(QStringLiteral("id")).toString();
+    const auto state = record.value(QStringLiteral("state")).toString();
+    if (!m_jobs.contains(id) && (state == QStringLiteral("queued") || state == QStringLiteral("preparing") ||
+                                state == QStringLiteral("downloading") || state == QStringLiteral("validating"))) {
+      m_database->updateDownloadState(id, QStringLiteral("paused"), record.value(QStringLiteral("progress")).toDouble(),
+                                      record.value(QStringLiteral("completedBytes")).toLongLong(), record.value(QStringLiteral("totalBytes")).toLongLong(),
+                                      QStringLiteral("Download was paused when AniCloud closed."));
+      recoveredInterruptedJob = true;
+    }
+  }
+  m_items = recoveredInterruptedJob ? m_database->downloads(owner) : records;
+  emit itemsChanged();
+}
+
+DownloadManager::Job *DownloadManager::jobFor(const QString &id) const { return m_jobs.value(id, nullptr); }
+
+QString DownloadManager::enqueue(const QVariantMap &episode, const QVariantMap &stream, int preferredHeight) {
+  if (!m_account->authenticated()) { setError(QStringLiteral("Sign in to download episodes.")); return {}; }
+  if (QNetworkInformation::instance() && QNetworkInformation::instance()->isMetered() &&
+      !QSettings().value(QStringLiteral("downloads/allowMetered"), false).toBool()) {
+    setError(QStringLiteral("Downloads on metered networks are disabled in Profile.")); return {};
+  }
+  const QUrl media(stream.value(QStringLiteral("mediaUrl")).toString());
+  if (!media.isValid()) { setError(QStringLiteral("No downloadable stream is available.")); return {}; }
+  auto *job = new Job;
+  job->id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  job->root = m_storageRoot + QLatin1Char('/') + job->id;
+  job->headers = stream.value(QStringLiteral("headers")).toMap();
+  if (!stream.value(QStringLiteral("referer")).toString().isEmpty()) job->headers.insert(QStringLiteral("Referer"), stream.value(QStringLiteral("referer")));
+  job->preferredHeight = qBound(144, preferredHeight, 4320);
+  job->record = episode;
+  if (!job->record.contains(QStringLiteral("episodeNumber"))) job->record.insert(QStringLiteral("episodeNumber"), episode.value(QStringLiteral("number")));
+  if (!job->record.contains(QStringLiteral("episodeName"))) job->record.insert(QStringLiteral("episodeName"), episode.value(QStringLiteral("title"), QStringLiteral("Episode %1").arg(episode.value(QStringLiteral("number")).toInt())));
+  job->record.insert(QStringLiteral("id"), job->id);
+  job->record.insert(QStringLiteral("ownerId"), m_account->user().value(QStringLiteral("id")).toString());
+  job->record.insert(QStringLiteral("mediaUrl"), media.toString(QUrl::FullyEncoded));
+  job->record.insert(QStringLiteral("headers"), job->headers);
+  job->record.insert(QStringLiteral("subtitles"), stream.value(QStringLiteral("subtitles")));
+  job->record.insert(QStringLiteral("referer"), stream.value(QStringLiteral("referer")));
+  job->record.insert(QStringLiteral("rootPath"), job->root);
+  job->record.insert(QStringLiteral("state"), QStringLiteral("queued"));
+  job->record.insert(QStringLiteral("qualityHeight"), job->preferredHeight);
+  job->record.insert(QStringLiteral("progress"), 0.0);
+  job->record.insert(QStringLiteral("completedBytes"), 0);
+  job->record.insert(QStringLiteral("totalBytes"), 0);
+  if (!QDir().mkpath(job->root + QStringLiteral("/resources"))) { delete job; setError(QStringLiteral("Unable to create the download directory.")); return {}; }
+  QString databaseError;
+  if (!m_database->upsertDownload(job->record, &databaseError)) { QDir(job->root).removeRecursively(); delete job; setError(databaseError); return {}; }
+  m_jobs.insert(job->id, job); setError({}); reload(); start(job); return job->id;
+}
+
+void DownloadManager::enqueueEpisode(const QVariantMap &episode, int preferredHeight) {
+  if (!m_account->authenticated()) { setError(QStringLiteral("Sign in to download episodes.")); return; }
+  auto pending = episode;
+  pending.insert(QStringLiteral("preferredHeight"), preferredHeight);
+  const int generation = ++m_resolveGeneration;
+  m_pendingEpisodes.insert(generation, pending);
+  m_provider->resolveStream(generation,
+    episode.value(QStringLiteral("episodeId"), episode.value(QStringLiteral("id"))).toString(),
+    episode.value(QStringLiteral("server"), QStringLiteral("hd-1")).toString(),
+    episode.value(QStringLiteral("audioMode"), QStringLiteral("sub")).toString());
+}
+
+void DownloadManager::start(Job *job) {
+  job->queued.clear(); job->expectedPaths.clear(); job->completedUrls.clear(); job->completedPaths.clear();
+  job->completedBytes = 0; job->totalBytes = 0; job->completedResources = 0; job->totalResources = 0;
+  job->record.remove(QStringLiteral("failure"));
+  for (const auto &value : m_database->downloadResources(job->id)) {
+    const auto resource = value.toMap();
+    const QUrl remote(resource.value(QStringLiteral("url")).toString());
+    const auto relative = resource.value(QStringLiteral("relativePath")).toString();
+    if (remote.isValid() && !relative.isEmpty())
+      job->paths.insert(remote.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment).toString(QUrl::FullyEncoded), relative);
+    const QFileInfo local(job->root + QLatin1Char('/') + relative);
+    const auto expectedSize = resource.value(QStringLiteral("size")).toLongLong();
+    if (resource.value(QStringLiteral("completed")).toBool() && local.isFile() && local.size() > 0 &&
+        (expectedSize <= 0 || expectedSize == local.size())) job->completedPaths.insert(relative, local.size());
+  }
+  job->paused = false; job->cancelled = false; update(job, QStringLiteral("preparing"));
+  fetchManifest(job, QUrl(job->record.value(QStringLiteral("mediaUrl")).toString()), true);
+}
+
+void DownloadManager::fetchManifest(Job *job, const QUrl &url, bool selectVariant) {
+  QNetworkRequest request(url); request.setTransferTimeout(30'000);
+  request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+  for (auto it = job->headers.cbegin(); it != job->headers.cend(); ++it) request.setRawHeader(it.key().toUtf8(), it.value().toString().toUtf8());
+  auto *reply = m_network.get(request);
+  job->active.insert(reply, {url, QStringLiteral("offline.m3u8"), {}, QStringLiteral("root-playlist")});
+  connect(reply, &QNetworkReply::finished, this, [this, job, reply, selectVariant] {
+    job->active.remove(reply);
+    if (job->cancelled || job->paused) { reply->deleteLater(); return; }
+    if (reply->error() != QNetworkReply::NoError) { fail(job, reply->errorString()); reply->deleteLater(); return; }
+    const auto body = reply->readAll(); const auto finalUrl = reply->url(); reply->deleteLater();
+    if (!HlsTools::looksLikePlaylist(body, finalUrl)) { fail(job, QStringLiteral("The source is not an HLS playlist.")); return; }
+    if (selectVariant) {
+      const auto available = HlsTools::variants(body, finalUrl);
+      if (!available.isEmpty()) { fetchManifest(job, HlsTools::selectVariant(available, job->preferredHeight).url, false); return; }
+    }
+    prepareMediaManifest(job, body, finalUrl);
+  });
+}
+
+QString DownloadManager::localResource(Job *job, const QUrl &url) {
+  const auto key = url.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment).toString(QUrl::FullyEncoded);
+  if (job->paths.contains(key)) return job->paths.value(key);
+  auto extension = QFileInfo(url.path()).suffix().toLower();
+  if (extension.isEmpty() || extension.size() > 8) extension = QStringLiteral("bin");
+  const auto relative = QStringLiteral("resources/%1.%2")
+    .arg(QString::fromLatin1(QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex().left(24)), extension);
+  job->paths.insert(key, relative);
+  return relative;
+}
+
+void DownloadManager::prepareMediaManifest(Job *job, const QByteArray &body, const QUrl &url) {
+  const auto listed = HlsTools::resources(body, url);
+  for (const auto &entry : listed) {
+    const auto relative = localResource(job, entry.url);
+    // Download the complete backing object once. The offline manifest keeps its
+    // original EXT-X-BYTERANGE offsets, which remain valid against the full file.
+    queueResource(job, {entry.url, relative, {}, entry.kind});
+  }
+  const auto supplemental = job->record.value(QStringLiteral("subtitles")).toList();
+  for (const auto &subtitleValue : supplemental) {
+    const auto subtitle = subtitleValue.toMap();
+    const QUrl subtitleUrl(subtitle.value(QStringLiteral("url"), subtitle.value(QStringLiteral("file"))).toString());
+    if (subtitleUrl.isValid()) {
+      const auto relative = localResource(job, subtitleUrl);
+      queueResource(job, {subtitleUrl, relative, {}, HlsTools::looksLikePlaylist({}, subtitleUrl) ? QStringLiteral("playlist") : QStringLiteral("subtitle")});
+    }
+  }
+  const QUrl artwork(job->record.value(QStringLiteral("animeImage")).toString());
+  if (artwork.isValid()) {
+    const auto relative = QStringLiteral("artwork.%1").arg(QFileInfo(artwork.path()).suffix().isEmpty() ? QStringLiteral("jpg") : QFileInfo(artwork.path()).suffix());
+    queueResource(job, {artwork, relative, {}, QStringLiteral("artwork")});
+  }
+  const auto rewritten = HlsTools::rewrite(body, url, [job, this](const QUrl &remote) { return QUrl(localResource(job, remote)); });
+  QSaveFile file(job->root + QStringLiteral("/offline.m3u8"));
+  if (!file.open(QIODevice::WriteOnly) || file.write(rewritten) != rewritten.size() || !file.commit()) { fail(job, file.errorString()); return; }
+  update(job, QStringLiteral("downloading")); pump(job);
+}
+
+bool DownloadManager::queueResource(Job *job, const Resource &resource) {
+  if (!resource.url.isValid() || resource.relativePath.isEmpty() || job->expectedPaths.contains(resource.relativePath)) return false;
+  job->expectedPaths.insert(resource.relativePath); ++job->totalResources;
+  const auto completedSize = job->completedPaths.value(resource.relativePath);
+  const bool playlistResource = resource.kind == QStringLiteral("playlist") || resource.kind == QStringLiteral("media") ||
+                                HlsTools::looksLikePlaylist({}, resource.url);
+  if (!playlistResource && completedSize > 0) {
+    ++job->completedResources; job->completedBytes += completedSize;
+    job->completedUrls.insert(resource.url.toString(QUrl::FullyEncoded));
+  } else {
+    job->queued.append(resource);
+  }
+  return true;
+}
+
+void DownloadManager::pump(Job *job) {
+  if (job->paused || job->cancelled) return;
+  while (job->active.size() < ConcurrentResources && !job->queued.isEmpty()) fetchResource(job, job->queued.takeFirst());
+  if (job->active.isEmpty() && job->queued.isEmpty()) {
+    update(job, QStringLiteral("validating"));
+    if (!QFileInfo::exists(job->root + QStringLiteral("/offline.m3u8"))) { fail(job, QStringLiteral("Offline playlist validation failed.")); return; }
+    for (const auto &relative : std::as_const(job->expectedPaths)) {
+      const QFileInfo resource(job->root + QLatin1Char('/') + relative);
+      if (!resource.isFile() || resource.size() <= 0) { fail(job, QStringLiteral("An offline resource failed integrity validation.")); return; }
+    }
+    update(job, QStringLiteral("completed")); emit downloadCompleted(job->id); m_jobs.remove(job->id); delete job;
+  }
+}
+
+void DownloadManager::fetchResource(Job *job, const Resource &resource) {
+  const auto resourceId = QString::fromLatin1(QCryptographicHash::hash((resource.url.toString(QUrl::FullyEncoded) + QLatin1Char('|') + resource.relativePath).toUtf8(), QCryptographicHash::Sha256).toHex());
+  m_database->upsertDownloadResource(job->id, {
+    {QStringLiteral("id"), resourceId}, {QStringLiteral("url"), resource.url.toString(QUrl::FullyEncoded)},
+    {QStringLiteral("relativePath"), resource.relativePath}, {QStringLiteral("byteRange"), resource.byteRange},
+  });
+  const auto partPath = job->root + QLatin1Char('/') + resource.relativePath + QStringLiteral(".part");
+  QDir().mkpath(QFileInfo(partPath).absolutePath());
+  const bool playlistResource = resource.kind == QStringLiteral("playlist") || resource.kind == QStringLiteral("media") ||
+                                HlsTools::looksLikePlaylist({}, resource.url);
+  if (!resource.byteRange.isEmpty() || playlistResource) QFile::remove(partPath);
+  const auto existing = QFileInfo(partPath).size();
+  QNetworkRequest request(resource.url); request.setTransferTimeout(45'000);
+  request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+  for (auto it = job->headers.cbegin(); it != job->headers.cend(); ++it) request.setRawHeader(it.key().toUtf8(), it.value().toString().toUtf8());
+  if (!resource.byteRange.isEmpty()) request.setRawHeader(QByteArrayLiteral("Range"), QByteArrayLiteral("bytes=") + resource.byteRange.toUtf8());
+  else if (existing > 0) request.setRawHeader(QByteArrayLiteral("Range"), QByteArrayLiteral("bytes=") + QByteArray::number(existing) + QByteArrayLiteral("-"));
+  auto *reply = m_network.get(request); job->active.insert(reply, resource);
+  connect(reply, &QNetworkReply::readyRead, this, [this, job, reply] { writeResourceData(job, reply); });
+  connect(reply, &QNetworkReply::finished, this, [this, job, reply] { finishResource(job, reply); });
+}
+
+void DownloadManager::writeResourceData(Job *job, QNetworkReply *reply) {
+  if (!job->active.contains(reply)) return;
+  auto *writer = job->writers.value(reply, nullptr);
+  if (!writer) {
+    const auto resource = job->active.value(reply);
+    const auto partPath = job->root + QLatin1Char('/') + resource.relativePath + QStringLiteral(".part");
+    writer = new QFile(partPath, this);
+    const bool playlistResource = resource.kind == QStringLiteral("playlist") || resource.kind == QStringLiteral("media") ||
+                                  HlsTools::looksLikePlaylist({}, resource.url);
+    const bool append = resource.byteRange.isEmpty() && !playlistResource &&
+                        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 206 && QFileInfo::exists(partPath);
+    if (!writer->open(QIODevice::WriteOnly | (append ? QIODevice::Append : QIODevice::Truncate))) {
+      reply->setProperty("anicloudWriteError", writer->errorString()); delete writer; reply->abort(); return;
+    }
+    job->writers.insert(reply, writer);
+  }
+  const auto chunk = reply->readAll();
+  if (!chunk.isEmpty() && writer->write(chunk) != chunk.size()) {
+    reply->setProperty("anicloudWriteError", writer->errorString()); reply->abort();
+  }
+}
+
+void DownloadManager::closeResourceWriter(Job *job, QNetworkReply *reply) {
+  if (auto *writer = job->writers.take(reply)) {
+    writer->flush(); writer->close(); delete writer;
+  }
+}
+
+void DownloadManager::finishResource(Job *job, QNetworkReply *reply) {
+  writeResourceData(job, reply);
+  const auto resource = job->active.take(reply);
+  closeResourceWriter(job, reply);
+  if (job->cancelled || job->paused) { reply->deleteLater(); return; }
+  const auto writeError = reply->property("anicloudWriteError").toString();
+  if (reply->error() != QNetworkReply::NoError || !writeError.isEmpty()) {
+    const auto message = writeError.isEmpty() ? reply->errorString() : writeError; reply->deleteLater(); fail(job, message); return;
+  }
+  const auto finalUrl = reply->url();
+  const auto finalPath = job->root + QLatin1Char('/') + resource.relativePath;
+  const auto partPath = finalPath + QStringLiteral(".part");
+  const QStorageInfo storage(job->root);
+  if (storage.isValid() && storage.bytesAvailable() < 8 * 1024 * 1024) {
+    reply->deleteLater(); fail(job, QStringLiteral("There is not enough free disk space to continue this download.")); return;
+  }
+  QFile completedPart(partPath);
+  if (!completedPart.open(QIODevice::ReadOnly)) { reply->deleteLater(); fail(job, completedPart.errorString()); return; }
+  const auto prefix = completedPart.peek(256);
+  const bool isPlaylist = HlsTools::looksLikePlaylist(prefix, finalUrl);
+  QByteArray body;
+  if (isPlaylist) body = completedPart.readAll();
+  completedPart.close();
+  if (isPlaylist) {
+    const auto nested = HlsTools::resources(body, finalUrl);
+    for (const auto &entry : nested) {
+      const auto relative = localResource(job, entry.url);
+      queueResource(job, {entry.url, relative, {}, entry.kind});
+    }
+    body = HlsTools::rewrite(body, finalUrl, [this, job, finalPath](const QUrl &remote) {
+      return QUrl(QDir(QFileInfo(finalPath).absolutePath()).relativeFilePath(job->root + QLatin1Char('/') + localResource(job, remote)));
+    });
+    QFile rewritten(partPath);
+    if (!rewritten.open(QIODevice::WriteOnly | QIODevice::Truncate) || rewritten.write(body) != body.size()) {
+      const auto message = rewritten.errorString(); rewritten.close(); reply->deleteLater(); fail(job, message); return;
+    }
+    rewritten.flush(); rewritten.close();
+  }
+  QFile::remove(finalPath);
+  if (!QFile::rename(partPath, finalPath)) { reply->deleteLater(); fail(job, QStringLiteral("Unable to complete a download resource.")); return; }
+  job->completedUrls.insert(resource.url.toString(QUrl::FullyEncoded));
+  const auto resourceId = QString::fromLatin1(QCryptographicHash::hash((resource.url.toString(QUrl::FullyEncoded) + QLatin1Char('|') + resource.relativePath).toUtf8(), QCryptographicHash::Sha256).toHex());
+  m_database->markDownloadResourceCompleted(job->id, resourceId, QFileInfo(finalPath).size());
+  job->completedBytes += QFileInfo(finalPath).size(); ++job->completedResources; reply->deleteLater(); update(job); pump(job);
+}
+
+void DownloadManager::update(Job *job, const QString &state) {
+  if (!state.isEmpty()) job->record.insert(QStringLiteral("state"), state);
+  const double progress = job->totalResources > 0 ? static_cast<double>(job->completedResources) / job->totalResources : 0.0;
+  job->record.insert(QStringLiteral("progress"), progress);
+  job->record.insert(QStringLiteral("completedBytes"), job->completedBytes);
+  job->record.insert(QStringLiteral("totalBytes"), job->totalBytes);
+  m_database->updateDownloadState(job->id, job->record.value(QStringLiteral("state")).toString(), progress, job->completedBytes, job->totalBytes,
+                                  job->record.value(QStringLiteral("failure")).toString());
+  reload();
+}
+
+void DownloadManager::fail(Job *job, const QString &message) {
+  job->paused = true;
+  for (auto *reply : job->active.keys()) {
+    QObject::disconnect(reply, nullptr, this, nullptr); writeResourceData(job, reply); closeResourceWriter(job, reply); reply->abort(); reply->deleteLater();
+  }
+  job->active.clear();
+  job->record.insert(QStringLiteral("failure"), message); setError(message); update(job, QStringLiteral("failed"));
+}
+
+void DownloadManager::pause(const QString &id) {
+  auto *job = jobFor(id); if (!job) return; job->paused = true;
+  for (auto it = job->active.cbegin(); it != job->active.cend(); ++it) job->queued.prepend(it.value());
+  for (auto *reply : job->active.keys()) { writeResourceData(job, reply); closeResourceWriter(job, reply); reply->abort(); }
+  job->active.clear(); update(job, QStringLiteral("paused"));
+}
+
+void DownloadManager::resume(const QString &id) {
+  if (auto *job = jobFor(id)) {
+    if (job->record.value(QStringLiteral("state")).toString() == QStringLiteral("failed") || job->totalResources == 0) {
+      job->queued.clear(); job->completedResources = 0; job->totalResources = 0; start(job);
+    } else { job->paused = false; update(job, QStringLiteral("downloading")); pump(job); }
+    return;
+  }
+  retry(id);
+}
+
+void DownloadManager::retry(const QString &id) {
+  for (const auto &value : m_database->downloads(m_account->user().value(QStringLiteral("id")).toString())) {
+    const auto record = value.toMap(); if (record.value(QStringLiteral("id")).toString() != id) continue;
+    auto *job = new Job; job->id = id; job->record = record; job->root = record.value(QStringLiteral("rootPath")).toString();
+    job->headers = record.value(QStringLiteral("headers")).toMap(); job->preferredHeight = record.value(QStringLiteral("qualityHeight"), 1080).toInt();
+    m_jobs.insert(id, job); start(job); return;
+  }
+}
+
+void DownloadManager::cancel(const QString &id) {
+  auto *job = jobFor(id); if (!job) return; job->cancelled = true;
+  for (auto *reply : job->active.keys()) { QObject::disconnect(reply, nullptr, this, nullptr); writeResourceData(job, reply); closeResourceWriter(job, reply); reply->abort(); reply->deleteLater(); }
+  job->active.clear(); update(job, QStringLiteral("cancelled")); m_jobs.remove(id); delete job;
+}
+
+void DownloadManager::remove(const QString &id) {
+  if (jobFor(id)) cancel(id);
+  QString root;
+  for (const auto &entry : m_database->downloads(m_account->user().value(QStringLiteral("id")).toString())) if (entry.toMap().value(QStringLiteral("id")).toString() == id) root = entry.toMap().value(QStringLiteral("rootPath")).toString();
+  if (root.isEmpty()) { setError(QStringLiteral("That download does not belong to the signed-in account.")); return; }
+  if (QFileInfo(root).absoluteFilePath().startsWith(QFileInfo(m_storageRoot).absoluteFilePath() + QDir::separator())) QDir(root).removeRecursively();
+  m_database->removeDownload(id); reload();
+}
+
+bool DownloadManager::copyAndVerify(const QString &source, const QString &destination, QString *error) {
+  QDir sourceDir(source); if (!sourceDir.exists()) return QDir().mkpath(destination);
+  if (!QDir().mkpath(destination)) { if (error) *error = QStringLiteral("Unable to create the new storage directory."); return false; }
+  for (const auto &info : sourceDir.entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries)) {
+    const auto target = destination + QLatin1Char('/') + info.fileName();
+    if (info.isDir()) { if (!copyAndVerify(info.absoluteFilePath(), target, error)) return false; }
+    else {
+      QFile::remove(target);
+      if (!QFile::copy(info.absoluteFilePath(), target) || QFileInfo(target).size() != info.size() || hashFile(target) != hashFile(info.absoluteFilePath())) {
+        if (error) *error = QStringLiteral("A downloaded file failed verification while moving storage."); return false;
+      }
+    }
+  }
+  return true;
+}
+
+void DownloadManager::moveStorage(const QString &directory) {
+  if (m_movingStorage || directory.isEmpty()) return;
+  if (!m_jobs.isEmpty()) { setError(QStringLiteral("Pause or finish active downloads before moving the library.")); return; }
+  const QUrl selected(directory);
+  const auto localDirectory = selected.isLocalFile() ? selected.toLocalFile() : directory;
+  const auto destination = QDir(localDirectory).absoluteFilePath(QStringLiteral("AniCloud-library"));
+  if (QFileInfo(destination).absoluteFilePath() == QFileInfo(m_storageRoot).absoluteFilePath()) return;
+  if (QFileInfo::exists(destination)) { setError(QStringLiteral("The selected folder already contains an AniCloud library.")); return; }
+  m_movingStorage = true; emit movingStorageChanged();
+  const auto source = m_storageRoot; const auto staging = destination + QStringLiteral(".staging");
+  auto *watcher = new QFutureWatcher<QPair<bool, QString>>(this);
+  connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, source, destination, staging] {
+    const auto result = watcher->result(); watcher->deleteLater();
+    if (result.first) {
+      if (QDir().rename(staging, destination)) {
+        QString dbError;
+        if (m_database->moveDownloadRoots(source, destination, &dbError)) {
+          QSettings().setValue(QStringLiteral("downloads/storageRoot"), destination); m_storageRoot = destination; emit storageRootChanged();
+          QDir(source).removeRecursively();
+        } else { QDir(destination).removeRecursively(); setError(dbError); }
+      } else { QDir(staging).removeRecursively(); setError(QStringLiteral("Unable to activate the new storage library.")); }
+    } else { QDir(staging).removeRecursively(); setError(result.second); }
+    m_movingStorage = false; emit movingStorageChanged(); reload();
+  });
+  watcher->setFuture(QtConcurrent::run([source, staging] {
+    QDir(staging).removeRecursively(); QString error; const bool ok = copyAndVerify(source, staging, &error); return qMakePair(ok, error);
+  }));
+}

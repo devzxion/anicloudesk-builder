@@ -1,0 +1,7 @@
+/out/
+/vcpkg_installed/
+/release/
+/.qt/
+*.user
+*.log
+update-public-key.local.cmake

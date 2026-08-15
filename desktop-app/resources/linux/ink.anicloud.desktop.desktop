@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AniCloud
+Comment=Native AniCloud desktop client
+Exec=AniCloud %u
+Icon=ink.anicloud.desktop
+Categories=AudioVideo;Video;
+MimeType=x-scheme-handler/anicloud;
+Terminal=false

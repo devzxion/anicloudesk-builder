@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleDisplayName</key><string>AniCloud</string>
+  <key>CFBundleExecutable</key><string>AniCloud</string>
+  <key>CFBundleIconFile</key><string>icon.png</string>
+  <key>CFBundleIdentifier</key><string>ink.anicloud.desktop</string>
+  <key>CFBundleName</key><string>AniCloud</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>@PROJECT_VERSION@</string>
+  <key>CFBundleVersion</key><string>@PROJECT_VERSION@</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>CFBundleURLTypes</key>
+  <array><dict><key>CFBundleURLName</key><string>AniCloud links</string><key>CFBundleURLSchemes</key><array><string>anicloud</string></array></dict></array>
+</dict>
+</plist>
