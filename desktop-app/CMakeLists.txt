@@ -129,7 +129,6 @@ target_include_directories(AniCloud PRIVATE
 target_compile_definitions(AniCloud PRIVATE
   QT_NO_CAST_FROM_ASCII
   QT_NO_CAST_TO_ASCII
-  ANICLOUD_VERSION="${PROJECT_VERSION}"
 )
 
 target_link_libraries(AniCloud PRIVATE

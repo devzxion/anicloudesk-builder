@@ -21,7 +21,6 @@ qt_add_executable(anicloud_update_tests
   ../src/UpdateService.cpp
 )
 target_include_directories(anicloud_update_tests PRIVATE ../src "${CMAKE_CURRENT_BINARY_DIR}/../generated")
-target_compile_definitions(anicloud_update_tests PRIVATE ANICLOUD_VERSION="4.0.1")
 target_link_libraries(anicloud_update_tests PRIVATE Qt6::Core Qt6::Network Qt6::Test unofficial-sodium::sodium)
 add_test(NAME signed_updates COMMAND anicloud_update_tests)
 
