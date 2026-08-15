@@ -2,6 +2,8 @@
 
 This is the official native Windows, macOS, and Linux client. It is a C++20/Qt Quick application; it does not load or package the AniCloud website.
 
+Anime catalog, details, episode, and stream requests are handled by the bundled C++ provider using the same MyAnimeList/MegaPlay data path as the mobile client. `https://api.anicloud.ink/public/api/v1` is used only for authentication, synced user data, maintenance, and notifications.
+
 ## Reproducible toolchain
 
 - CMake 3.28+
@@ -29,4 +31,4 @@ cmake --install out/build/release --prefix out/stage
 
 The native data root is deliberately versioned as `native-v1`; no Electron token, preference, history, or downloaded file is imported or deleted.
 
-See [RELEASING.md](RELEASING.md) for signed package and manifest requirements.
+See [RELEASING.md](RELEASING.md) for package and signed update-manifest requirements.

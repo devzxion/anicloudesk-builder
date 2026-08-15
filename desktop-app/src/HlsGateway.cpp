@@ -125,7 +125,7 @@ void HlsGateway::proxy(QTcpSocket *socket, const QByteArray &method, const QStri
   request.setTransferTimeout(30'000);
   for (auto header = it->headers.cbegin(); header != it->headers.cend(); ++header)
     if (!header.value().toString().isEmpty()) request.setRawHeader(header.key().toUtf8(), header.value().toString().toUtf8());
-  if (!request.hasRawHeader(QByteArrayLiteral("User-Agent"))) request.setRawHeader(QByteArrayLiteral("User-Agent"), QByteArrayLiteral("AniCloudDesktop/4.0.0 (Qt; native)"));
+  if (!request.hasRawHeader(QByteArrayLiteral("User-Agent"))) request.setRawHeader(QByteArrayLiteral("User-Agent"), QByteArrayLiteral("AniCloudDesktop/4.0.1 (Qt; native)"));
   if (incomingHeaders.contains(QByteArrayLiteral("range"))) request.setRawHeader(QByteArrayLiteral("Range"), incomingHeaders.value(QByteArrayLiteral("range")));
   auto *reply = method == QByteArrayLiteral("HEAD") ? m_network.head(request) : m_network.get(request);
   connect(socket, &QTcpSocket::disconnected, reply, &QNetworkReply::abort);

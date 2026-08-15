@@ -6,16 +6,150 @@
 
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMap>
 #include <QNetworkInformation>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QRegularExpression>
+#include <QTextDocumentFragment>
 #include <QUrlQuery>
 #include <QUuid>
+#include <QSet>
 #include <initializer_list>
 #include <utility>
 
 namespace {
-const QByteArray UserAgent("AniCloudDesktop/4.0.0 (Qt; native)");
+const QByteArray UserAgent("AniCloudDesktop/" ANICLOUD_VERSION " (Qt; native)");
+const QByteArray ProviderUserAgent(
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+  "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36");
+const QString MalBaseUrl = QStringLiteral("https://myanimelist.net");
+const QString MegaplayBaseUrl = QStringLiteral("https://megaplay.buzz");
+
+QRegularExpression rx(const QString &pattern) {
+  return QRegularExpression(pattern, QRegularExpression::CaseInsensitiveOption |
+                            QRegularExpression::DotMatchesEverythingOption);
+}
+
+QString htmlText(const QString &value) {
+  auto cleaned = value;
+  cleaned.remove(rx(QStringLiteral("<script\\b[^>]*>.*?</script>")));
+  cleaned.remove(rx(QStringLiteral("<style\\b[^>]*>.*?</style>")));
+  return QTextDocumentFragment::fromHtml(cleaned).toPlainText().simplified();
+}
+
+QString capture(const QString &value, const QString &pattern, int group = 1) {
+  const auto match = rx(pattern).match(value);
+  return match.hasMatch() ? match.captured(group) : QString{};
+}
+
+QString htmlAttribute(const QString &tag, const QString &name) {
+  const auto pattern = QStringLiteral("\\b%1\\s*=\\s*[\\\"']([^\\\"']*)[\\\"']")
+                         .arg(QRegularExpression::escape(name));
+  return htmlText(capture(tag, pattern));
+}
+
+QString normalizeImage(QString value) {
+  value = htmlText(value).trimmed();
+  if (value.startsWith(QStringLiteral("//"))) value.prepend(QStringLiteral("https:"));
+  if (value.startsWith(QLatin1Char('/'))) value.prepend(MalBaseUrl);
+  value.replace(rx(QStringLiteral("/r/\\d+x\\d+/")), QStringLiteral("/"));
+  return value;
+}
+
+QString posterFrom(const QString &block) {
+  auto it = rx(QStringLiteral("<img\\b[^>]*>")).globalMatch(block);
+  while (it.hasNext()) {
+    const auto tag = it.next().captured(0);
+    for (const auto &attribute : {QStringLiteral("data-src"), QStringLiteral("data-lazy-src"),
+                                  QStringLiteral("src"), QStringLiteral("data-srcset"),
+                                  QStringLiteral("srcset")}) {
+      auto value = htmlAttribute(tag, attribute);
+      if (value.isEmpty() || value.contains(QStringLiteral("spacer.gif"))) continue;
+      value = value.section(QLatin1Char(' '), 0, 0);
+      if (value.startsWith(QStringLiteral("http")) || value.startsWith(QStringLiteral("//")))
+        return normalizeImage(value);
+    }
+  }
+  return {};
+}
+
+struct AnimeIdentity {
+  QString id;
+  QString title;
+};
+
+AnimeIdentity animeIdentity(const QString &block) {
+  AnimeIdentity result;
+  auto links = rx(QStringLiteral(
+    "<a\\b([^>]*)href\\s*=\\s*[\\\"'][^\\\"']*/anime/(\\d+)(?:/[^\\\"']*)?[\\\"']([^>]*)>(.*?)</a>"))
+                 .globalMatch(block);
+  while (links.hasNext()) {
+    const auto match = links.next();
+    if (result.id.isEmpty()) result.id = match.captured(2);
+    auto title = htmlText(match.captured(4));
+    if (title.isEmpty()) {
+      const auto attributes = match.captured(1) + match.captured(3);
+      title = htmlAttribute(QStringLiteral("<a %1>").arg(attributes), QStringLiteral("title"));
+    }
+    if (!title.isEmpty()) {
+      result.id = match.captured(2);
+      result.title = title;
+      break;
+    }
+  }
+  return result;
+}
+
+int firstNumber(const QString &value, const QString &pattern) {
+  return capture(value, pattern).toInt();
+}
+
+QVariantMap providerCard(const AnimeIdentity &identity, const QString &poster, int episodes,
+                         const QString &type = QStringLiteral("TV"),
+                         const QString &duration = QStringLiteral("N/A"),
+                         const QString &synopsis = {}) {
+  return QVariantMap{
+    {QStringLiteral("id"), identity.id},
+    {QStringLiteral("title"), identity.title},
+    {QStringLiteral("alternativeTitle"), identity.title},
+    {QStringLiteral("poster"), poster},
+    {QStringLiteral("type"), type.isEmpty() ? QStringLiteral("TV") : type},
+    {QStringLiteral("duration"), duration.isEmpty() ? QStringLiteral("N/A") : duration},
+    {QStringLiteral("synopsis"), synopsis},
+    {QStringLiteral("subEpisodes"), qMax(0, episodes)},
+    {QStringLiteral("dubEpisodes"), 0},
+    {QStringLiteral("episodes"), qMax(0, episodes)},
+  };
+}
+
+QUrl providerUrl(const QString &base, const QString &path,
+                 const QList<QPair<QString, QString>> &parameters = {}) {
+  QUrl url(base + path);
+  QUrlQuery query;
+  for (const auto &[key, value] : parameters) query.addQueryItem(key, value);
+  if (!parameters.isEmpty()) url.setQuery(query);
+  return url;
+}
+
+QList<QPair<QByteArray, QByteArray>> malHeaders() {
+  return {
+    {QByteArrayLiteral("User-Agent"), ProviderUserAgent},
+    {QByteArrayLiteral("Accept"), QByteArrayLiteral("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")},
+    {QByteArrayLiteral("Accept-Language"), QByteArrayLiteral("en-US,en;q=0.9")},
+    {QByteArrayLiteral("Referer"), QByteArrayLiteral("https://myanimelist.net/")},
+  };
+}
+
+QList<QPair<QByteArray, QByteArray>> megaplayHeaders(const QUrl &referer = {}) {
+  QList<QPair<QByteArray, QByteArray>> headers{
+    {QByteArrayLiteral("User-Agent"), ProviderUserAgent},
+    {QByteArrayLiteral("Accept-Language"), QByteArrayLiteral("en-US,en;q=0.9")},
+    {QByteArrayLiteral("Referer"), referer.isValid() ? referer.toString().toUtf8()
+                                                     : QByteArrayLiteral("https://megaplay.buzz/")},
+  };
+  return headers;
+}
 
 QString firstString(const QJsonObject &value, std::initializer_list<const char *> keys) {
   for (const auto *key : keys) {
@@ -85,24 +219,30 @@ void ProviderClient::setError(const QString &error) {
 
 QJsonObject ProviderClient::payload(const QJsonObject &root) { return innerPayload(root); }
 
-void ProviderClient::get(const QString &path, Success success, std::function<void(const QString &)> failure) {
-  QNetworkRequest request(apiUrl(QString::fromUtf8(ANICLOUD_PROVIDER_API_BASE_URL), path));
-  request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json"));
-  request.setRawHeader(QByteArrayLiteral("User-Agent"), UserAgent);
+void ProviderClient::getText(const QUrl &url,
+                             const QList<QPair<QByteArray, QByteArray>> &headers,
+                             TextSuccess success,
+                             std::function<void(const QString &)> failure) {
+  QNetworkRequest request(url);
+  request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                       QNetworkRequest::NoLessSafeRedirectPolicy);
+  request.setTransferTimeout(75'000);
+  for (const auto &[name, value] : headers) request.setRawHeader(name, value);
   const bool wasLoading = loading();
   ++m_pending;
   if (!wasLoading) emit loadingChanged();
   auto *reply = m_network.get(request);
   connect(reply, &QNetworkReply::finished, this, [this, reply, success = std::move(success), failure = std::move(failure)] {
-    const auto doc = QJsonDocument::fromJson(reply->readAll());
-    const auto root = doc.object();
+    const auto body = reply->readAll();
     const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    const bool ok = reply->error() == QNetworkReply::NoError && status >= 200 && status < 300 && doc.isObject();
+    const bool ok = reply->error() == QNetworkReply::NoError && status >= 200 && status < 300 && !body.isEmpty();
     if (ok) {
       setError({});
-      success(root);
+      success(body, reply->url());
     } else {
-      const auto message = networkMessage(reply, root);
+      const auto message = status > 0
+        ? QStringLiteral("Anime provider returned HTTP %1.").arg(status)
+        : reply->errorString();
       setError(message);
       if (failure) failure(message);
     }
@@ -110,6 +250,144 @@ void ProviderClient::get(const QString &path, Success success, std::function<voi
     --m_pending;
     if (m_pending == 0) emit loadingChanged();
   });
+}
+
+QVariantList ProviderClient::parseTopAnimeHtml(const QString &html, int limit) {
+  QVariantList result;
+  auto rows = rx(QStringLiteral(
+    "<tr\\b[^>]*class\\s*=\\s*[\\\"'][^\\\"']*ranking-list[^\\\"']*[\\\"'][^>]*>.*?</tr>"))
+                .globalMatch(html);
+  while (rows.hasNext() && result.size() < qMax(1, limit)) {
+    const auto block = rows.next().captured(0);
+    const auto identity = animeIdentity(block);
+    if (identity.id.isEmpty() || identity.title.isEmpty()) continue;
+    const auto episodes = firstNumber(block, QStringLiteral("\\((\\d+)\\s*eps\\)"));
+    auto type = htmlText(capture(block, QStringLiteral("<div\\b[^>]*class\\s*=\\s*[\\\"'][^\\\"']*information[^\\\"']*[\\\"'][^>]*>(.*?)</div>")));
+    type = capture(type, QStringLiteral("^([A-Za-z0-9+.-]+)"));
+    auto duration = capture(block, QStringLiteral("(\\d+)\\s*min"));
+    if (!duration.isEmpty()) duration.append(QLatin1Char('m'));
+    auto item = providerCard(identity, posterFrom(block), episodes, type, duration);
+    item.insert(QStringLiteral("rank"), firstNumber(block, QStringLiteral("top-anime-rank-text[^>]*>(\\d+)")));
+    result.append(item);
+  }
+  return result;
+}
+
+QVariantList ProviderClient::parseSeasonAnimeHtml(const QString &html, int page, int limit) {
+  QVariantList all;
+  const auto opener = rx(QStringLiteral(
+    "<div\\b[^>]*class\\s*=\\s*[\\\"'][^\\\"']*\\sjs-seasonal-anime(?=\\s|[\\\"'])[^\\\"']*[\\\"'][^>]*>"));
+  QList<qsizetype> starts;
+  auto matches = opener.globalMatch(html);
+  while (matches.hasNext()) starts.append(matches.next().capturedStart());
+  for (qsizetype index = 0; index < starts.size(); ++index) {
+    const auto end = index + 1 < starts.size() ? starts.at(index + 1) : html.size();
+    const auto block = html.mid(starts.at(index), end - starts.at(index));
+    const auto identity = animeIdentity(block);
+    if (identity.id.isEmpty() || identity.title.isEmpty()) continue;
+    const auto episodes = firstNumber(block, QStringLiteral("(\\d+)\\s*eps"));
+    auto duration = capture(block, QStringLiteral("(\\d+)\\s*min"));
+    if (!duration.isEmpty()) duration.append(QLatin1Char('m'));
+    auto type = QStringLiteral("TV");
+    const auto classText = capture(block.left(500), QStringLiteral("class\\s*=\\s*[\\\"']([^\\\"']+)[\\\"']"));
+    if (classText.contains(QStringLiteral("js-anime-type-2"))) type = QStringLiteral("Movie");
+    else if (classText.contains(QStringLiteral("js-anime-type-3"))) type = QStringLiteral("OVA");
+    else if (classText.contains(QStringLiteral("js-anime-type-4"))) type = QStringLiteral("Special");
+    else if (classText.contains(QStringLiteral("js-anime-type-5"))) type = QStringLiteral("ONA");
+    else if (classText.contains(QStringLiteral("js-anime-type-6"))) type = QStringLiteral("Music");
+    all.append(providerCard(identity, posterFrom(block), episodes, type, duration));
+  }
+  const auto pageSize = qMax(1, limit);
+  const auto start = (qMax(1, page) - 1) * pageSize;
+  return all.mid(start, pageSize);
+}
+
+QVariantList ProviderClient::parseSearchHtml(const QString &html, int limit) {
+  QVariantList result;
+  QSet<QString> seen;
+  auto rows = rx(QStringLiteral("<tr\\b[^>]*>.*?</tr>")).globalMatch(html);
+  while (rows.hasNext() && result.size() < qMax(1, limit)) {
+    const auto block = rows.next().captured(0);
+    if (!block.contains(QStringLiteral("hoverinfo_trigger"), Qt::CaseInsensitive)) continue;
+    const auto identity = animeIdentity(block);
+    if (identity.id.isEmpty() || identity.title.isEmpty() || seen.contains(identity.id)) continue;
+    auto cells = rx(QStringLiteral("<td\\b[^>]*>(.*?)</td>")).globalMatch(block);
+    QStringList textCells;
+    while (cells.hasNext()) textCells.append(htmlText(cells.next().captured(1)));
+    if (textCells.size() < 5) continue;
+    seen.insert(identity.id);
+    result.append(providerCard(identity, posterFrom(block), textCells.at(3).toInt(),
+                               textCells.at(2), QStringLiteral("N/A")));
+  }
+  return result;
+}
+
+QVariantMap ProviderClient::parseAnimeDetailsHtml(const QString &html, const QString &animeId,
+                                                  QVariantList *recommendations) {
+  auto title = htmlText(capture(html, QStringLiteral(
+    "<h1\\b[^>]*class\\s*=\\s*[\\\"'][^\\\"']*title-name[^\\\"']*[\\\"'][^>]*>(.*?)</h1>")));
+  if (title.isEmpty()) title = htmlText(capture(html, QStringLiteral("<title>(.*?)</title>"))).section(QStringLiteral(" - "), 0, 0);
+  auto alternativeTitle = htmlText(capture(html, QStringLiteral(
+    "<(?:p|div)\\b[^>]*class\\s*=\\s*[\\\"'][^\\\"']*title-english[^\\\"']*[\\\"'][^>]*>(.*?)</(?:p|div)>")));
+  if (alternativeTitle.isEmpty()) alternativeTitle = title;
+
+  QMap<QString, QString> details;
+  auto detailRows = rx(QStringLiteral(
+    "<(?:div|span)\\b[^>]*class\\s*=\\s*[\\\"'][^\\\"']*spaceit_pad[^\\\"']*[\\\"'][^>]*>(.*?)</(?:div|span)>"))
+                      .globalMatch(html);
+  while (detailRows.hasNext()) {
+    const auto block = detailRows.next().captured(1);
+    auto key = htmlText(capture(block, QStringLiteral(
+      "<span\\b[^>]*class\\s*=\\s*[\\\"'][^\\\"']*dark_text[^\\\"']*[\\\"'][^>]*>(.*?)</span>")));
+    key.remove(QLatin1Char(':'));
+    key = key.trimmed();
+    if (key.isEmpty()) continue;
+    auto value = htmlText(block);
+    if (value.startsWith(key)) value = value.mid(key.size()).remove(QRegularExpression(QStringLiteral("^:\\s*")));
+    details.insert(key, value.trimmed());
+  }
+
+  auto posterTag = capture(html, QStringLiteral("<img\\b[^>]*itemprop\\s*=\\s*[\\\"']image[\\\"'][^>]*>"), 0);
+  auto poster = posterFrom(posterTag);
+  if (poster.isEmpty()) poster = posterFrom(capture(html, QStringLiteral(
+    "<div\\b[^>]*class\\s*=\\s*[\\\"'][^\\\"']*leftside[^\\\"']*[\\\"'][^>]*>(.*?)</div>")));
+  const auto synopsis = htmlText(capture(html, QStringLiteral(
+    "<(?:p|span)\\b[^>]*itemprop\\s*=\\s*[\\\"']description[\\\"'][^>]*>(.*?)</(?:p|span)>")));
+  const auto episodes = firstNumber(details.value(QStringLiteral("Episodes")), QStringLiteral("(\\d+)"));
+  auto result = providerCard({animeId, title}, poster, episodes,
+                             details.value(QStringLiteral("Type")),
+                             details.value(QStringLiteral("Duration")), synopsis);
+  result.insert(QStringLiteral("alternativeTitle"), alternativeTitle);
+  result.insert(QStringLiteral("status"), details.value(QStringLiteral("Status")));
+  result.insert(QStringLiteral("rating"), details.value(QStringLiteral("Rating")));
+  result.insert(QStringLiteral("premiered"), details.value(QStringLiteral("Premiered")));
+  result.insert(QStringLiteral("aired"), details.value(QStringLiteral("Aired")));
+  result.insert(QStringLiteral("score"), details.value(QStringLiteral("Score")));
+
+  if (recommendations) {
+    recommendations->clear();
+    QSet<QString> seen{animeId};
+    const auto recommendationStart = html.indexOf(QStringLiteral("anime_recommendation"), 0, Qt::CaseInsensitive);
+    if (recommendationStart < 0) return result;
+    auto recommendationHtml = html.mid(recommendationStart);
+    auto anchors = rx(QStringLiteral(
+      "<a\\b([^>]*)href\\s*=\\s*[\\\"'][^\\\"']*/anime/(\\d+)(?:/[^\\\"']*)?[\\\"']([^>]*)>(.*?)</a>"))
+                   .globalMatch(recommendationHtml);
+    while (anchors.hasNext() && recommendations->size() < 24) {
+      const auto match = anchors.next();
+      const auto id = match.captured(2);
+      if (seen.contains(id)) continue;
+      auto candidateTitle = htmlText(match.captured(4));
+      if (candidateTitle.isEmpty()) {
+        const auto attributes = QStringLiteral("<a %1 %2>").arg(match.captured(1), match.captured(3));
+        candidateTitle = htmlAttribute(attributes, QStringLiteral("title"));
+      }
+      if (candidateTitle.isEmpty()) continue;
+      seen.insert(id);
+      recommendations->append(providerCard({id, candidateTitle}, QString{}, 0));
+    }
+  }
+  return result;
 }
 
 QVariantList ProviderClient::cardList(const QJsonValue &value) {
@@ -161,37 +439,35 @@ QVariantList ProviderClient::episodeList(const QJsonValue &value, const QString 
 }
 
 void ProviderClient::loadHome() {
-  get(QStringLiteral("/home"), [this](const QJsonObject &root) {
-    const auto data = payload(root);
-    m_spotlight = cardList(data.value(QStringLiteral("spotlight")));
-    if (m_spotlight.isEmpty()) m_spotlight = cardList(data.value(QStringLiteral("spotlightAnimes")));
-    if (m_spotlight.isEmpty()) m_spotlight = cardList(data.value(QStringLiteral("anilistTrending")));
-    auto recent = cardList(data.value(QStringLiteral("recent")));
-    if (recent.isEmpty()) recent = cardList(data.value(QStringLiteral("latestEpisodes")));
-    auto popular = cardList(data.value(QStringLiteral("popular")));
-    if (popular.isEmpty()) popular = cardList(data.value(QStringLiteral("gogoPopular")));
-    const auto airing = cardList(data.value(QStringLiteral("topAiring")));
-    if (!recent.isEmpty()) m_recent = recent;
-    if (!popular.isEmpty()) m_popular = popular;
-    if (!airing.isEmpty()) m_airing = airing;
-    emit homeChanged();
-  });
+  setError({});
   loadCategory(QStringLiteral("recent"), 1);
   loadCategory(QStringLiteral("popular"), 1);
   loadCategory(QStringLiteral("airing"), 1);
 }
 
 void ProviderClient::loadCategory(const QString &kind, int page) {
-  QString path;
-  if (kind == QStringLiteral("recent")) path = QStringLiteral("/recent/%1").arg(page);
-  else if (kind == QStringLiteral("popular")) path = QStringLiteral("/gogoPopular/%1").arg(page);
-  else path = QStringLiteral("/topAiring/%1").arg(page);
-  get(path, [this, kind](const QJsonObject &root) {
-    auto items = cardList(root.value(QStringLiteral("results")));
-    if (items.isEmpty()) items = cardList(payload(root));
+  QUrl url;
+  if (kind == QStringLiteral("recent")) {
+    url = providerUrl(MalBaseUrl, QStringLiteral("/anime/season"));
+  } else {
+    url = providerUrl(MalBaseUrl, QStringLiteral("/topanime.php"), {
+      {QStringLiteral("type"), kind == QStringLiteral("popular") ? QStringLiteral("bypopularity")
+                                                                  : QStringLiteral("airing")},
+      {QStringLiteral("limit"), QString::number(qMax(0, page - 1) * 50)},
+    });
+  }
+  getText(url, malHeaders(), [this, kind, page](const QByteArray &body, const QUrl &) {
+    const auto html = QString::fromUtf8(body);
+    auto items = kind == QStringLiteral("recent")
+      ? parseSeasonAnimeHtml(html, page, 20)
+      : parseTopAnimeHtml(html, 20);
     if (kind == QStringLiteral("recent")) m_recent = items;
-    else if (kind == QStringLiteral("popular")) m_popular = items;
-    else m_airing = items;
+    else if (kind == QStringLiteral("popular")) {
+      m_popular = items;
+    } else {
+      m_airing = items;
+      m_spotlight = items.mid(0, 10);
+    }
     emit homeChanged();
   });
 }
@@ -200,65 +476,66 @@ void ProviderClient::search(const QString &query, int page) {
   if (query.trimmed().isEmpty()) {
     m_searchResults.clear(); m_searchHasMore = false; emit searchChanged(); return;
   }
-  const auto path = QStringLiteral("/search/%1?page=%2")
-    .arg(QString::fromUtf8(QUrl::toPercentEncoding(query.trimmed())), QString::number(qMax(1, page)));
-  get(path, [this, page](const QJsonObject &root) {
-    const auto data = payload(root);
-    auto items = cardList(root.value(QStringLiteral("results")));
-    if (items.isEmpty()) items = cardList(data);
-    if (page <= 1) m_searchResults = items; else m_searchResults.append(items);
-    const auto pageInfo = data.value(QStringLiteral("pageInfo")).toObject();
-    auto totalPages = firstInt(data, {"totalPages", "total_pages"});
-    if (totalPages <= 0) totalPages = firstInt(pageInfo, {"totalPages", "total_pages"});
-    m_searchHasMore = pageInfo.contains(QStringLiteral("hasNextPage"))
-      ? pageInfo.value(QStringLiteral("hasNextPage")).toBool()
-      : totalPages > 0 ? page < totalPages : !items.isEmpty();
+  const auto currentPage = qMax(1, page);
+  const auto url = providerUrl(MalBaseUrl, QStringLiteral("/anime.php"), {
+    {QStringLiteral("q"), query.trimmed()},
+    {QStringLiteral("cat"), QStringLiteral("anime")},
+    {QStringLiteral("show"), QString::number((currentPage - 1) * 20)},
+  });
+  getText(url, malHeaders(), [this, currentPage](const QByteArray &body, const QUrl &) {
+    const auto items = parseSearchHtml(QString::fromUtf8(body), 20);
+    if (currentPage <= 1) m_searchResults = items; else m_searchResults.append(items);
+    m_searchHasMore = items.size() >= 20;
     emit searchChanged();
   });
 }
 
 void ProviderClient::loadDetails(const QString &animeId) {
   m_details.clear(); m_episodes.clear(); m_recommendations.clear(); emit detailsChanged();
-  const auto encoded = QString::fromUtf8(QUrl::toPercentEncoding(animeId));
-  get(QStringLiteral("/anime/%1").arg(encoded), [this, animeId](const QJsonObject &root) {
-    const auto data = payload(root);
-    auto anime = data.value(QStringLiteral("anime")).toObject();
-    if (anime.isEmpty()) anime = data;
-    m_details = card(anime);
-    for (auto it = anime.begin(); it != anime.end(); ++it) m_details.insert(it.key(), it.value().toVariant());
-    auto episodeValue = data.value(QStringLiteral("episodes"));
-    if (episodeValue.isUndefined()) episodeValue = anime.value(QStringLiteral("episodes"));
-    if (episodeValue.isArray()) m_episodes = episodeList(episodeValue, animeId);
+  const auto url = providerUrl(MalBaseUrl, QStringLiteral("/anime/%1").arg(
+    QString::fromUtf8(QUrl::toPercentEncoding(animeId))));
+  getText(url, malHeaders(), [this, animeId](const QByteArray &body, const QUrl &) {
+    m_details = parseAnimeDetailsHtml(QString::fromUtf8(body), animeId, &m_recommendations);
+    applyEpisodes(animeId, qMax(1, m_details.value(QStringLiteral("episodes")).toInt()));
     emit detailsChanged();
   });
-  get(QStringLiteral("/recommendations/%1").arg(encoded), [this](const QJsonObject &root) {
-    m_recommendations = cardList(root.value(QStringLiteral("results")));
-    if (m_recommendations.isEmpty()) m_recommendations = cardList(payload(root));
-    emit detailsChanged();
-  });
-  loadEpisodes(animeId, 0, 12);
+}
+
+void ProviderClient::applyEpisodes(const QString &animeId, int episodeCount) {
+  m_episodes.clear();
+  for (int number = 1; number <= qBound(1, episodeCount, 3000); ++number) {
+    m_episodes.append(QVariantMap{
+      {QStringLiteral("id"), QStringLiteral("%1::ep=%2").arg(animeId).arg(number)},
+      {QStringLiteral("animeId"), animeId},
+      {QStringLiteral("number"), number},
+      {QStringLiteral("title"), QStringLiteral("Episode %1").arg(number)},
+    });
+  }
 }
 
 void ProviderClient::loadEpisodes(const QString &animeId, int offset, int limit) {
-  const auto encoded = QString::fromUtf8(QUrl::toPercentEncoding(animeId));
-  get(QStringLiteral("/episodes/%1?offset=%2&limit=%3").arg(encoded).arg(qMax(0, offset)).arg(qBound(1, limit, 100)),
-      [this, animeId, offset](const QJsonObject &root) {
-    auto items = episodeList(payload(root), animeId);
-    if (items.isEmpty()) items = episodeList(root.value(QStringLiteral("results")), animeId);
-    if (offset == 0) m_episodes = items; else m_episodes.append(items);
+  Q_UNUSED(offset)
+  Q_UNUSED(limit)
+  if (m_details.value(QStringLiteral("id")).toString() == animeId &&
+      m_details.value(QStringLiteral("episodes")).toInt() > 0) {
+    applyEpisodes(animeId, m_details.value(QStringLiteral("episodes")).toInt());
     emit detailsChanged();
-  });
+    return;
+  }
+  loadDetails(animeId);
 }
 
 void ProviderClient::loadServers(const QString &episodeId) {
-  const auto encoded = QString::fromUtf8(QUrl::toPercentEncoding(episodeId));
-  get(QStringLiteral("/servers/%1").arg(encoded), [this](const QJsonObject &root) {
-    const auto data = payload(root);
-    m_subServers.clear(); m_dubServers.clear();
-    for (const auto &value : data.value(QStringLiteral("sub")).toArray()) if (value.isObject()) m_subServers.append(value.toObject().toVariantMap());
-    for (const auto &value : data.value(QStringLiteral("dub")).toArray()) if (value.isObject()) m_dubServers.append(value.toObject().toVariantMap());
-    emit serversChanged();
-  });
+  Q_UNUSED(episodeId)
+  m_subServers = {
+    QVariantMap{{QStringLiteral("index"), 0}, {QStringLiteral("type"), QStringLiteral("sub")}, {QStringLiteral("id"), 1}, {QStringLiteral("name"), QStringLiteral("hd-1")}},
+    QVariantMap{{QStringLiteral("index"), 1}, {QStringLiteral("type"), QStringLiteral("sub")}, {QStringLiteral("id"), 2}, {QStringLiteral("name"), QStringLiteral("hd-2")}},
+  };
+  m_dubServers = {
+    QVariantMap{{QStringLiteral("index"), 0}, {QStringLiteral("type"), QStringLiteral("dub")}, {QStringLiteral("id"), 1}, {QStringLiteral("name"), QStringLiteral("hd-1")}},
+    QVariantMap{{QStringLiteral("index"), 1}, {QStringLiteral("type"), QStringLiteral("dub")}, {QStringLiteral("id"), 2}, {QStringLiteral("name"), QStringLiteral("hd-2")}},
+  };
+  emit serversChanged();
 }
 
 QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &episodeId,
@@ -285,6 +562,7 @@ QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &ep
 
   auto sources = data.value(QStringLiteral("sources")).toArray();
   if (sources.isEmpty() && data.value(QStringLiteral("source")).isArray()) sources = data.value(QStringLiteral("source")).toArray();
+  if (sources.isEmpty() && data.value(QStringLiteral("sources")).isObject()) sources.append(data.value(QStringLiteral("sources")));
   QVariantList alternates;
   QString selected;
   for (const auto &sourceValue : sources) {
@@ -297,7 +575,7 @@ QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &ep
     const auto label = source.value(QStringLiteral("label")).toString().toLower();
     if (selected.isEmpty() || label.contains(QStringLiteral("auto"))) selected = url;
   }
-  if (selected.isEmpty()) selected = firstString(data, {"file", "url", "link"});
+  if (selected.isEmpty()) selected = firstString(data, {"directFile", "file", "url", "link"});
   result.insert(QStringLiteral("mediaUrl"), selected);
   result.insert(QStringLiteral("alternates"), alternates);
 
@@ -322,18 +600,71 @@ QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &ep
 
 void ProviderClient::resolveStream(int generation, const QString &episodeId,
                                    const QString &server, const QString &audioMode) {
-  const auto path = QStringLiteral("/episode/%1?server=%2&type=%3")
-    .arg(QString::fromUtf8(QUrl::toPercentEncoding(episodeId)),
-         QString::fromUtf8(QUrl::toPercentEncoding(server)),
-         QString::fromUtf8(QUrl::toPercentEncoding(audioMode)));
-  get(path, [this, generation, episodeId, server, audioMode](const QJsonObject &root) {
-    const auto stream = streamMap(root, episodeId, server, audioMode);
-    if (stream.value(QStringLiteral("mediaUrl")).toString().isEmpty()) {
-      emit streamFailed(generation, QStringLiteral("This server did not return a playable stream."));
+  resolveStreamPage(generation, episodeId, server, audioMode, true);
+}
+
+void ProviderClient::resolveStreamPage(int generation, const QString &episodeId,
+                                       const QString &server, const QString &audioMode,
+                                       bool allowFallback) {
+  const auto match = QRegularExpression(QStringLiteral("^(.+)::ep=(\\d+)$"),
+                                         QRegularExpression::CaseInsensitiveOption).match(episodeId);
+  if (!match.hasMatch()) {
+    const auto message = QStringLiteral("This episode has an invalid bundled-provider identifier.");
+    setError(message); emit streamFailed(generation, message); return;
+  }
+  const auto animeId = match.captured(1);
+  const auto episodeNumber = qMax(1, match.captured(2).toInt());
+  const auto normalizedServer = server == QStringLiteral("hd-2") ? QStringLiteral("hd-2") : QStringLiteral("hd-1");
+  const auto mode = normalizedServer == QStringLiteral("hd-1") ? QStringLiteral("ani") : QStringLiteral("mal");
+  const auto normalizedAudio = audioMode == QStringLiteral("dub") ? QStringLiteral("dub") : QStringLiteral("sub");
+  const auto streamPage = providerUrl(MegaplayBaseUrl,
+    QStringLiteral("/stream/%1/%2/%3/%4").arg(mode, animeId, QString::number(episodeNumber), normalizedAudio));
+
+  const auto fallback = [this, generation, episodeId, normalizedServer, normalizedAudio, allowFallback](const QString &message) {
+    if (allowFallback) {
+      resolveStreamPage(generation, episodeId,
+                        normalizedServer == QStringLiteral("hd-1") ? QStringLiteral("hd-2") : QStringLiteral("hd-1"),
+                        normalizedAudio, false);
     } else {
-      emit streamResolved(generation, stream);
+      emit streamFailed(generation, message);
     }
-  }, [this, generation](const QString &message) { emit streamFailed(generation, message); });
+  };
+
+  getText(streamPage, megaplayHeaders(),
+          [this, generation, episodeId, normalizedServer, normalizedAudio, streamPage, fallback]
+          (const QByteArray &body, const QUrl &) {
+    const auto html = QString::fromUtf8(body);
+    auto sourceId = capture(html, QStringLiteral("data-id\\s*=\\s*[\\\"']([A-Za-z0-9_-]+)[\\\"']"));
+    if (sourceId.isEmpty())
+      sourceId = capture(html, QStringLiteral("/stream/getSources\\?id=([A-Za-z0-9_-]+)"));
+    if (sourceId.isEmpty()) {
+      fallback(QStringLiteral("This server has no stream for the selected episode."));
+      return;
+    }
+    const auto sourcesUrl = providerUrl(MegaplayBaseUrl, QStringLiteral("/stream/getSources"),
+                                         {{QStringLiteral("id"), sourceId}});
+    auto headers = megaplayHeaders(streamPage);
+    headers.append({QByteArrayLiteral("X-Requested-With"), QByteArrayLiteral("XMLHttpRequest")});
+    headers.append({QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain,*/*")});
+    getText(sourcesUrl, headers,
+            [this, generation, episodeId, normalizedServer, normalizedAudio, fallback]
+            (const QByteArray &json, const QUrl &) {
+      const auto document = QJsonDocument::fromJson(json);
+      if (!document.isObject()) {
+        fallback(QStringLiteral("The stream provider returned invalid data."));
+        return;
+      }
+      auto root = document.object();
+      if (root.value(QStringLiteral("data")).isObject()) root = root.value(QStringLiteral("data")).toObject();
+      root.insert(QStringLiteral("server"), normalizedServer);
+      root.insert(QStringLiteral("referer"), QStringLiteral("https://megaplay.buzz/"));
+      const auto stream = streamMap(root, episodeId, normalizedServer, normalizedAudio);
+      if (stream.value(QStringLiteral("mediaUrl")).toString().isEmpty())
+        fallback(QStringLiteral("This server did not return a playable stream."));
+      else
+        emit streamResolved(generation, stream);
+    }, fallback);
+  }, fallback);
 }
 
 AccountClient::AccountClient(SecureStore *secureStore, Database *database, QObject *parent)

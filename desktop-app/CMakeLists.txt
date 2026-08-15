@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(AniCloudDesktop VERSION 4.0.0 LANGUAGES CXX)
+project(AniCloudDesktop VERSION 4.0.1 LANGUAGES CXX)
 
 if(WIN32)
   enable_language(RC)
@@ -58,7 +58,6 @@ qt_standard_project_setup(REQUIRES 6.10)
 
 set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
-set(ANICLOUD_PROVIDER_API_BASE_URL "https://api.anicloud.ink/api/v1" CACHE STRING "AniCloud provider API")
 set(ANICLOUD_ACCOUNT_API_BASE_URL "https://api.anicloud.ink/public/api/v1" CACHE STRING "AniCloud account API")
 set(ANICLOUD_RELEASE_REPOSITORY "devz-on/anicloudesk" CACHE STRING "GitHub release repository")
 set(ANICLOUD_UPDATE_PUBLIC_KEY_HEX "" CACHE STRING "Ed25519 public key used to verify desktop release manifests")
@@ -114,6 +113,12 @@ qt_add_qml_module(AniCloud
     qml/pages/PlayerPage.qml
   RESOURCES
     resources/icon.png
+    resources/icons/home.svg
+    resources/icons/discover.svg
+    resources/icons/download.svg
+    resources/icons/library.svg
+    resources/icons/profile.svg
+    resources/icons/notification.svg
 )
 
 target_include_directories(AniCloud PRIVATE

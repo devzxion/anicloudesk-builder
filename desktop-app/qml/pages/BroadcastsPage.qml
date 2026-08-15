@@ -6,7 +6,7 @@ import AniCloud
 Item {
     ColumnLayout {
         anchors.fill: parent; anchors.margins: 30; spacing: 18
-        RowLayout { Layout.fillWidth: true; Text { text: "Broadcasts"; color: Theme.text; font.pixelSize: Theme.titleSize; font.weight: Font.Black; Layout.fillWidth: true } AppButton { text: "Refresh"; compact: true; secondary: true; onClicked: Account.refreshBroadcasts() } }
+        RowLayout { Layout.fillWidth: true; Text { text: "Notifications"; color: Theme.text; font.pixelSize: Theme.titleSize; font.weight: Font.Black; Layout.fillWidth: true } AppButton { text: "Refresh"; compact: true; secondary: true; onClicked: Account.refreshBroadcasts() } }
         ListView {
             id: list; Layout.fillWidth: true; Layout.fillHeight: true; model: Account.broadcasts; spacing: 10; clip: true; ScrollBar.vertical: ScrollBar {}
             delegate: Rectangle {
@@ -21,6 +21,6 @@ Item {
                 MouseArea { anchors.fill: parent; acceptedButtons: Qt.LeftButton; propagateComposedEvents: true; onClicked: Account.markBroadcastRead(modelData.id) }
             }
         }
-        EmptyState { visible: list.count === 0; title: "No broadcasts"; message: "Service announcements will appear here."; Layout.fillWidth: true; Layout.fillHeight: true }
+        EmptyState { visible: list.count === 0; title: "No notifications"; message: "Service announcements and account notifications will appear here."; Layout.fillWidth: true; Layout.fillHeight: true }
     }
 }

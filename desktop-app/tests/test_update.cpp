@@ -8,9 +8,9 @@ class UpdateServiceTest final : public QObject {
   Q_OBJECT
 private slots:
   void comparesSemanticVersions() {
-    QCOMPARE(UpdateService::compareVersions(QStringLiteral("4.0.1"), QStringLiteral("4.0.0")), 1);
-    QCOMPARE(UpdateService::compareVersions(QStringLiteral("v4.0.0"), QStringLiteral("4.0.0")), 0);
-    QCOMPARE(UpdateService::compareVersions(QStringLiteral("3.9.9"), QStringLiteral("4.0.0")), -1);
+    QCOMPARE(UpdateService::compareVersions(QStringLiteral("4.0.2"), QStringLiteral("4.0.1")), 1);
+    QCOMPARE(UpdateService::compareVersions(QStringLiteral("v4.0.1"), QStringLiteral("4.0.1")), 0);
+    QCOMPARE(UpdateService::compareVersions(QStringLiteral("4.0.0"), QStringLiteral("4.0.1")), -1);
   }
 
   void verifiesDetachedEd25519Signature() {

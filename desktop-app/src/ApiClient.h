@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QObject>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 #include <functional>
@@ -58,6 +59,11 @@ public:
   static QVariantList episodeList(const QJsonValue &value, const QString &animeId);
   static QVariantMap streamMap(const QJsonObject &root, const QString &episodeId,
                                const QString &server, const QString &audioMode);
+  static QVariantList parseTopAnimeHtml(const QString &html, int limit = 20);
+  static QVariantList parseSeasonAnimeHtml(const QString &html, int page = 1, int limit = 20);
+  static QVariantList parseSearchHtml(const QString &html, int limit = 20);
+  static QVariantMap parseAnimeDetailsHtml(const QString &html, const QString &animeId,
+                                           QVariantList *recommendations = nullptr);
 
 signals:
   void loadingChanged();
@@ -70,8 +76,12 @@ signals:
   void streamFailed(int generation, const QString &message);
 
 private:
-  using Success = std::function<void(const QJsonObject &)>;
-  void get(const QString &path, Success success, std::function<void(const QString &)> failure = {});
+  using TextSuccess = std::function<void(const QByteArray &, const QUrl &)>;
+  void getText(const QUrl &url, const QList<QPair<QByteArray, QByteArray>> &headers,
+               TextSuccess success, std::function<void(const QString &)> failure = {});
+  void resolveStreamPage(int generation, const QString &episodeId, const QString &server,
+                         const QString &audioMode, bool allowFallback);
+  void applyEpisodes(const QString &animeId, int episodeCount);
   void setError(const QString &error);
   static QJsonObject payload(const QJsonObject &root);
 

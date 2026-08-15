@@ -12,8 +12,8 @@ TestCase {
             height: 800
             readonly property bool compact: width < 900
             property string route: "home"
-            readonly property var routes: ["home", "discover", "details", "downloads", "library", "profile", "auth", "broadcasts", "player"]
-            property string accessibleLabel: "AniCloud native shell"
+            readonly property var routes: ["home", "discover", "details", "downloads", "library", "profile", "auth", "notifications", "player"]
+            property string accessibleLabel: "AniCloud desktop shell"
             Accessible.name: accessibleLabel
         }
     }
@@ -33,7 +33,7 @@ TestCase {
             { tag: "home", route: "home" }, { tag: "discover", route: "discover" },
             { tag: "details", route: "details" }, { tag: "downloads", route: "downloads" },
             { tag: "library", route: "library" }, { tag: "profile", route: "profile" },
-            { tag: "auth", route: "auth" }, { tag: "broadcasts", route: "broadcasts" },
+            { tag: "auth", route: "auth" }, { tag: "notifications", route: "notifications" },
             { tag: "player", route: "player" }
         ]
     }

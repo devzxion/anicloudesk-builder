@@ -33,9 +33,10 @@ ApplicationWindow {
         anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
         height: 42; color: Theme.background; z: 20
         RowLayout {
-            anchors.fill: parent; anchors.leftMargin: 14; spacing: 8
-            Text { text: "ANICLOUD"; color: Theme.red; font.pixelSize: 15; font.weight: Font.Black }
-            Text { text: "NATIVE"; color: Theme.muted; font.pixelSize: 9; Layout.fillWidth: true }
+            anchors.fill: parent; anchors.leftMargin: 14; spacing: 0
+            Text { text: "Ani"; color: Theme.red; font.pixelSize: 17; font.weight: Font.Black }
+            Text { text: "Cloud"; color: "#FFFFFF"; font.pixelSize: 17; font.weight: Font.Black }
+            Item { Layout.fillWidth: true }
             Button { text: "—"; implicitWidth: 46; implicitHeight: 42; flat: true; palette.buttonText: Theme.text; Accessible.name: "Minimize"; onClicked: window.showMinimized() }
             Button { text: window.visibility === Window.Maximized ? "❐" : "□"; implicitWidth: 46; implicitHeight: 42; flat: true; palette.buttonText: Theme.text; Accessible.name: "Maximize"; onClicked: window.visibility === Window.Maximized ? window.showNormal() : window.showMaximized() }
             Button {
@@ -56,11 +57,12 @@ ApplicationWindow {
         anchors.top: titleBar.bottom
         anchors.bottom: parent.bottom
         anchors.left: parent.left
-        width: compact ? parent.width : 224
+        width: compact ? parent.width : preferredWidth
         height: compact ? 68 : parent.height - titleBar.height
         anchors.topMargin: compact ? parent.height - titleBar.height - height : 0
         z: 10
         onNavigate: route => Runtime.route = route
+        Behavior on width { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
     }
 
     Loader {
@@ -77,7 +79,7 @@ ApplicationWindow {
             if (Runtime.route === "library") return libraryPage
             if (Runtime.route === "profile") return profilePage
             if (Runtime.route === "auth") return authPage
-            if (Runtime.route === "broadcasts") return broadcastsPage
+            if (Runtime.route === "notifications" || Runtime.route === "broadcasts") return notificationsPage
             return homePage
         }
         onLoaded: updateDetailsRoute()
@@ -95,7 +97,7 @@ ApplicationWindow {
     Component { id: libraryPage; LibraryPage {} }
     Component { id: profilePage; ProfilePage {} }
     Component { id: authPage; AuthPage {} }
-    Component { id: broadcastsPage; BroadcastsPage {} }
+    Component { id: notificationsPage; BroadcastsPage {} }
 
     PlayerPage {
         id: playerPage
@@ -140,7 +142,7 @@ ApplicationWindow {
     Connections {
         target: Account
         function onBroadcastsChanged() {
-            if (Account.broadcasts.length && !Account.broadcasts[0].read) Runtime.showNotification(Account.broadcasts[0].title || "AniCloud", Account.broadcasts[0].message || "New broadcast")
+            if (Account.broadcasts.length && !Account.broadcasts[0].read) Runtime.showNotification(Account.broadcasts[0].title || "AniCloud", Account.broadcasts[0].message || "New notification")
         }
     }
 }
