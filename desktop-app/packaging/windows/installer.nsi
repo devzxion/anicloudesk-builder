@@ -3,7 +3,7 @@ Unicode true
 !include "FileFunc.nsh"
 
 !define PRODUCT_NAME "AniCloud"
-!define PRODUCT_VERSION "4.0.1"
+!define PRODUCT_VERSION "4.0.2"
 !define PRODUCT_ID "ink.anicloud.desktop"
 
 Name "${PRODUCT_NAME}"
@@ -44,6 +44,7 @@ legacy_removed:
   WriteRegStr HKCR "anicloud" "" "URL:AniCloud Protocol"
   WriteRegStr HKCR "anicloud" "URL Protocol" ""
   WriteRegStr HKCR "anicloud\shell\open\command" "" '"$INSTDIR\AniCloud.exe" "%1"'
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AniCloud" '"$INSTDIR\AniCloud.exe" --background'
   CreateDirectory "$SMPROGRAMS\AniCloud"
   CreateShortcut "$SMPROGRAMS\AniCloud\AniCloud.lnk" "$INSTDIR\AniCloud.exe" "" "$INSTDIR\AniCloud.exe"
   CreateShortcut "$DESKTOP\AniCloud.lnk" "$INSTDIR\AniCloud.exe" "" "$INSTDIR\AniCloud.exe"
@@ -55,6 +56,7 @@ Section "Uninstall"
   Delete "$SMPROGRAMS\AniCloud\AniCloud.lnk"
   RMDir "$SMPROGRAMS\AniCloud"
   DeleteRegKey HKCR "anicloud"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AniCloud"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_ID}"
   RMDir /r "$INSTDIR"
 SectionEnd

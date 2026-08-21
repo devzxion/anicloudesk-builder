@@ -34,6 +34,34 @@ private slots:
     QVERIFY(navigationSource.contains("navigationFocus.activeFocus"));
     QVERIFY(navigationSource.contains("routeSelected"));
     QVERIFY(navigationSource.contains("Notifications"));
+    QVERIFY(mainSource.contains("showBroadcastNotification"));
+    QVERIFY(mainSource.contains("showWindowRequested"));
+  }
+
+  void detailsExposePublicShareLink() {
+    QFile details(QStringLiteral(ANICLOUD_SOURCE_DIR "/qml/pages/DetailsPage.qml")); QVERIFY(details.open(QIODevice::ReadOnly));
+    const auto source = details.readAll();
+    QVERIFY(source.contains("text: \"Share\""));
+    QVERIFY(source.contains("Runtime.shareAnime"));
+  }
+
+  void profileExplainsBackgroundNotifications() {
+    QFile profile(QStringLiteral(ANICLOUD_SOURCE_DIR "/qml/pages/ProfilePage.qml")); QVERIFY(profile.open(QIODevice::ReadOnly));
+    const auto source = profile.readAll();
+    QVERIFY(source.contains("Background notifications"));
+    QVERIFY(source.contains("Starts quietly with your computer"));
+  }
+
+  void runtimeKeepsNotificationsAliveWithoutTheWindow() {
+    QFile runtime(QStringLiteral(ANICLOUD_SOURCE_DIR "/src/AppRuntime.cpp")); QVERIFY(runtime.open(QIODevice::ReadOnly));
+    QFile main(QStringLiteral(ANICLOUD_SOURCE_DIR "/src/main.cpp")); QVERIFY(main.open(QIODevice::ReadOnly));
+    const auto runtimeSource = runtime.readAll();
+    const auto mainSource = main.readAll();
+    QVERIFY(runtimeSource.contains("updateAutoStart"));
+    QVERIFY(runtimeSource.contains("lastBroadcastId"));
+    QVERIFY(mainSource.contains("--background"));
+    QVERIFY(mainSource.contains("QLocalServer"));
+    QVERIFY(mainSource.contains("60 * 1000"));
   }
 
   void paletteIsCanonical() {

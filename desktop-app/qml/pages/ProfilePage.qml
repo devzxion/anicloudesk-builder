@@ -69,7 +69,7 @@ Flickable {
             columnSpacing: 16; rowSpacing: 16
 
             Rectangle {
-                Layout.fillWidth: true; Layout.preferredHeight: 278
+                Layout.fillWidth: true; Layout.preferredHeight: 310
                 radius: Theme.radius; color: Theme.surface; border.color: Theme.border
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 18; spacing: 12
@@ -114,7 +114,7 @@ Flickable {
             }
 
             Rectangle {
-                Layout.fillWidth: true; Layout.preferredHeight: 278
+                Layout.fillWidth: true; Layout.preferredHeight: 310
                 radius: Theme.radius; color: Theme.surface; border.color: Theme.border
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 18; spacing: 12
@@ -130,10 +130,17 @@ Flickable {
                     }
                     CheckBox {
                         Layout.fillWidth: true
-                        text: "Desktop notifications"
+                        text: "Background notifications"
                         checked: Runtime.notificationsEnabled
                         onToggled: Runtime.notificationsEnabled = checked
                         palette.windowText: Theme.text
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: Runtime.trayAvailable
+                              ? "Starts quietly with your computer and checks for new AniCloud alerts even when the window is closed. Use the tray icon to reopen or fully quit."
+                              : "Background notifications are unavailable because this desktop has no system tray."
+                        color: Theme.muted; font.pixelSize: 11; wrapMode: Text.WordWrap
                     }
                     Item { Layout.fillHeight: true }
                     Text {

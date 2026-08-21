@@ -9,7 +9,7 @@ ApplicationWindow {
     height: Math.max(560, Number(Runtime.windowValue("height", 800)))
     minimumWidth: 720
     minimumHeight: 520
-    visible: true
+    visible: !Runtime.backgroundLaunch
     title: "AniCloud"
     color: Theme.background
     flags: Qt.Window | Qt.FramelessWindowHint
@@ -26,6 +26,13 @@ ApplicationWindow {
         Runtime.setWindowValue("y", window.y)
         Runtime.setWindowValue("width", window.width)
         Runtime.setWindowValue("height", window.height)
+        if (Runtime.notificationsEnabled && Runtime.trayAvailable) {
+            close.accepted = false
+            window.hide()
+        } else {
+            close.accepted = true
+            Runtime.quitApplication()
+        }
     }
 
     Rectangle {
@@ -146,7 +153,16 @@ ApplicationWindow {
     Connections {
         target: Account
         function onBroadcastsChanged() {
-            if (Account.broadcasts.length && !Account.broadcasts[0].read) Runtime.showNotification(Account.broadcasts[0].title || "AniCloud", Account.broadcasts[0].message || "New notification")
+            if (Account.broadcasts.length && !Account.broadcasts[0].read)
+                Runtime.showBroadcastNotification(String(Account.broadcasts[0].id || ""), Account.broadcasts[0].title || "AniCloud", Account.broadcasts[0].message || "New notification", Account.broadcasts[0].linkUrl || "")
+        }
+    }
+    Connections {
+        target: Runtime
+        function onShowWindowRequested() {
+            window.show()
+            window.raise()
+            window.requestActivate()
         }
     }
 }

@@ -4,6 +4,8 @@ This is the official native Windows, macOS, and Linux client. It is a C++20/Qt Q
 
 Anime catalog, details, episode, and stream requests are handled by the bundled C++ provider using the same MyAnimeList/MegaPlay data path as the mobile client. `https://api.anicloud.ink/public/api/v1` is used only for authentication, synced user data, maintenance, and notifications.
 
+When background notifications are enabled, AniCloud registers a per-user login task, stays available in the system tray after its window closes, polls the broadcast endpoint once per minute, and suppresses duplicate native alerts. A tray action fully quits the process. Public anime share links use `https://anicloud.ink/anime/{myAnimeListId}` and are forwarded to the running native instance through the `anicloud://` deep-link protocol.
+
 ## Reproducible toolchain
 
 - CMake 3.28+

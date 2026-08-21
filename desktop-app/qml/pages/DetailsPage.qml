@@ -7,6 +7,7 @@ Flickable {
     id: root
     property string animeId: ""
     property int episodeLimit: 12
+    property string shareNotice: ""
     contentWidth: width
     contentHeight: content.implicitHeight + 40
     clip: true
@@ -30,7 +31,17 @@ Flickable {
                     Text { text: Provider.details.synopsis || Provider.details.description || ""; color: "#D0F8F8FA"; font.pixelSize: 14; maximumLineCount: 6; elide: Text.ElideRight; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     RowLayout {
                         AppButton { text: Account.watchlist.some(item => item.animeId === root.animeId) ? "✓ My List" : "+ My List"; enabled: Account.authenticated; onClicked: Account.watchlist.some(item => item.animeId === root.animeId) ? Account.removeFromWatchlist(root.animeId) : Account.addToWatchlist(Provider.details) }
-                        AppButton { text: "Copy link"; secondary: true; onClicked: Runtime.copyText("anicloud://details/" + root.animeId) }
+                        AppButton {
+                            text: "Share"
+                            secondary: true
+                            onClicked: Runtime.shareAnime(root.animeId, Provider.details.title || "Anime")
+                        }
+                        Text {
+                            visible: root.shareNotice.length > 0
+                            text: root.shareNotice
+                            color: "#7EE787"
+                            font.pixelSize: 12
+                        }
                     }
                 }
             }
@@ -65,4 +76,12 @@ Flickable {
     }
     LoadingSkeleton { anchors.centerIn: parent; width: Math.min(760, parent.width - 64); rows: 4; visible: Provider.loading && !Provider.details.title }
     EmptyState { anchors.centerIn: parent; visible: !Provider.loading && !Provider.details.title && Provider.error.length > 0; title: "Details unavailable"; message: Provider.error; symbol: "!" }
+    Timer { id: shareNoticeTimer; interval: 2800; onTriggered: root.shareNotice = "" }
+    Connections {
+        target: Runtime
+        function onShareLinkCopied(url) {
+            root.shareNotice = "AniCloud link copied"
+            shareNoticeTimer.restart()
+        }
+    }
 }

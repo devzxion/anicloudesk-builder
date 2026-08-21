@@ -5,6 +5,7 @@
 #include <QVariantList>
 
 class Database;
+class QMenu;
 class QSystemTrayIcon;
 
 class AppRuntime final : public QObject {
@@ -16,10 +17,12 @@ class AppRuntime final : public QObject {
   Q_PROPERTY(int downloadQuality READ downloadQuality WRITE setDownloadQuality NOTIFY preferencesChanged)
   Q_PROPERTY(bool allowMeteredDownloads READ allowMeteredDownloads WRITE setAllowMeteredDownloads NOTIFY preferencesChanged)
   Q_PROPERTY(bool notificationsEnabled READ notificationsEnabled WRITE setNotificationsEnabled NOTIFY preferencesChanged)
+  Q_PROPERTY(bool backgroundLaunch READ backgroundLaunch CONSTANT)
+  Q_PROPERTY(bool trayAvailable READ trayAvailable CONSTANT)
   Q_PROPERTY(QString pendingRoute READ pendingRoute NOTIFY pendingRouteChanged)
 
 public:
-  explicit AppRuntime(Database *database, QObject *parent = nullptr);
+  explicit AppRuntime(Database *database, bool backgroundLaunch = false, QObject *parent = nullptr);
   ~AppRuntime() override;
 
   [[nodiscard]] QString route() const { return m_route; }
@@ -29,6 +32,8 @@ public:
   [[nodiscard]] int downloadQuality() const;
   [[nodiscard]] bool allowMeteredDownloads() const;
   [[nodiscard]] bool notificationsEnabled() const;
+  [[nodiscard]] bool backgroundLaunch() const { return m_backgroundLaunch; }
+  [[nodiscard]] bool trayAvailable() const { return m_tray != nullptr; }
   [[nodiscard]] QString pendingRoute() const { return m_pendingRoute; }
 
   void setRoute(const QString &route);
@@ -43,6 +48,12 @@ public:
   Q_INVOKABLE void handleDeepLink(const QString &url);
   Q_INVOKABLE void restorePendingRoute();
   Q_INVOKABLE void showNotification(const QString &title, const QString &message);
+  Q_INVOKABLE void showBroadcastNotification(const QString &id, const QString &title,
+                                               const QString &message, const QString &linkUrl = {});
+  Q_INVOKABLE QString animeShareUrl(const QString &animeId) const;
+  Q_INVOKABLE void shareAnime(const QString &animeId, const QString &title = {});
+  Q_INVOKABLE void requestShow();
+  Q_INVOKABLE void quitApplication();
   Q_INVOKABLE QVariant windowValue(const QString &key, const QVariant &fallback = {}) const;
   Q_INVOKABLE void setWindowValue(const QString &key, const QVariant &value);
   Q_INVOKABLE void copyText(const QString &text);
@@ -53,11 +64,19 @@ signals:
   void preferencesChanged();
   void pendingRouteChanged();
   void deepLinkReceived(const QString &route);
+  void showWindowRequested();
+  void shareLinkCopied(const QString &url);
 
 private:
+  void updateAutoStart(bool enabled);
+  void openNotificationLink();
+
   Database *m_database = nullptr;
   QSettings m_settings;
   QSystemTrayIcon *m_tray = nullptr;
+  QMenu *m_trayMenu = nullptr;
+  bool m_backgroundLaunch = false;
+  QString m_notificationLink;
   QString m_route = QStringLiteral("home");
   QString m_pendingRoute;
   QVariantList m_localHistory;
