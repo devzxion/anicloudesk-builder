@@ -35,7 +35,7 @@ private slots:
     QVERIFY(navigationSource.contains("routeSelected"));
     QVERIFY(navigationSource.contains("Notifications"));
     QVERIFY(mainSource.contains("showBroadcastNotification"));
-    QVERIFY(mainSource.contains("showWindowRequested"));
+    QVERIFY(mainSource.contains("onShowWindowRequested"));
   }
 
   void detailsExposePublicShareLink() {
