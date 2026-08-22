@@ -42,12 +42,14 @@ private slots:
 
     const auto manifest = request(QUrl(local));
     QCOMPARE(manifest.status, 200);
+    QVERIFY(QUrl(local).path().endsWith(QStringLiteral(".m3u8")));
     QVERIFY(manifest.body.startsWith("#EXTM3U"));
     QVERIFY(!manifest.body.contains("127.0.0.1:") || !manifest.body.contains(QByteArray::number(m_upstream.serverPort())));
     const auto segmentLine = manifest.body.split('\n').last().trimmed();
     const QUrl segmentUrl(QString::fromUtf8(segmentLine));
     QVERIFY(segmentUrl.isValid());
     QVERIFY(segmentUrl.path().startsWith(QStringLiteral("/s/")));
+    QVERIFY(segmentUrl.path().endsWith(QStringLiteral(".ts")));
 
     QNetworkRequest rangedRequest(segmentUrl);
     rangedRequest.setRawHeader(QByteArrayLiteral("Range"), QByteArrayLiteral("bytes=1-2"));
@@ -94,7 +96,23 @@ private slots:
     QVERIFY(manifest.body.contains("#EXT-X-MEDIA:TYPE=SUBTITLES"));
     QVERIFY(manifest.body.contains("NAME=\"English\""));
     QVERIFY(manifest.body.contains("SUBTITLES=\"anicloud-subs\""));
+    QVERIFY(manifest.body.contains(".vtt\""));
     QVERIFY(!manifest.body.contains(QByteArray::number(m_upstream.serverPort())));
+  }
+
+  void assignsTransportStreamSuffixToDisguisedSegments() {
+    HlsGateway gateway;
+    const auto local = QUrl(gateway.openSession({
+      {QStringLiteral("mediaUrl"), upstreamUrl(QStringLiteral("/fake-extension.m3u8")).toString()},
+    }));
+    const auto manifest = request(local);
+    QCOMPARE(manifest.status, 200);
+    const QUrl segmentUrl(QString::fromUtf8(manifest.body.split('\n').last().trimmed()));
+    QVERIFY(segmentUrl.isValid());
+    QVERIFY(segmentUrl.path().endsWith(QStringLiteral(".ts")));
+    const auto segment = request(segmentUrl);
+    QCOMPARE(segment.status, 200);
+    QCOMPARE(segment.body, QByteArrayLiteral("FAKE-TS"));
   }
 
 private:
@@ -152,6 +170,11 @@ private:
       writeResponse(socket, 200, method == QByteArrayLiteral("HEAD") ? QByteArray{} : body, body.size(), {});
       return;
     }
+    if (path == QStringLiteral("/fake-extension.m3u8")) {
+      const QByteArray body("#EXTM3U\n#EXTINF:5,\n/disguised.jpg");
+      writeResponse(socket, 200, method == QByteArrayLiteral("HEAD") ? QByteArray{} : body, body.size(), {});
+      return;
+    }
     if (path == QStringLiteral("/en.vtt")) {
       const QByteArray body("WEBVTT\n\n00:00.000 --> 00:01.000\nHello");
       writeResponse(socket, 200, method == QByteArrayLiteral("HEAD") ? QByteArray{} : body, body.size(), {});
@@ -164,6 +187,11 @@ private:
       } else {
         writeResponse(socket, 200, method == QByteArrayLiteral("HEAD") ? QByteArray{} : full, full.size(), {});
       }
+      return;
+    }
+    if (path == QStringLiteral("/disguised.jpg")) {
+      const QByteArray full("FAKE-TS");
+      writeResponse(socket, 200, method == QByteArrayLiteral("HEAD") ? QByteArray{} : full, full.size(), {});
       return;
     }
     writeResponse(socket, 404, QByteArrayLiteral("missing"), 7, {});

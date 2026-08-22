@@ -3,7 +3,7 @@ Unicode true
 !include "FileFunc.nsh"
 
 !define PRODUCT_NAME "AniCloud"
-!define PRODUCT_VERSION "4.0.3"
+!define PRODUCT_VERSION "4.0.4"
 !define PRODUCT_ID "ink.anicloud.desktop"
 
 Name "${PRODUCT_NAME}"

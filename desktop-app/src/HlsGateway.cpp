@@ -3,6 +3,7 @@
 #include "HlsTools.h"
 
 #include <QCryptographicHash>
+#include <QFileInfo>
 #include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -10,6 +11,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPointer>
+#include <QSet>
 #include <QTcpSocket>
 #include <QUrlQuery>
 #include <QUuid>
@@ -28,6 +30,37 @@ bool needsPublicResolution(const QString &host) {
   return normalized.endsWith(QStringLiteral(".tiktokcdn.com")) ||
          normalized.endsWith(QStringLiteral(".byteoversea.com")) ||
          normalized.endsWith(QStringLiteral(".ibyteimg.com"));
+}
+
+QString localResourceSuffix(const QUrl &upstream, const QString &resourceKind) {
+  const auto kind = resourceKind.toLower();
+  const auto extension = QFileInfo(upstream.path()).suffix().toLower();
+  if (kind == QStringLiteral("playlist")) return QStringLiteral(".m3u8");
+  if (kind == QStringLiteral("subtitle")) return QStringLiteral(".vtt");
+  if (kind == QStringLiteral("key")) return QStringLiteral(".key");
+  if (kind == QStringLiteral("media")) {
+    if (extension == QStringLiteral("vtt") || extension == QStringLiteral("webvtt") ||
+        extension == QStringLiteral("srt")) return QStringLiteral(".vtt");
+    return QStringLiteral(".m3u8");
+  }
+
+  static const QSet<QString> allowedMediaExtensions{
+    QStringLiteral("ts"), QStringLiteral("m2ts"), QStringLiteral("mts"),
+    QStringLiteral("m4s"), QStringLiteral("mp4"), QStringLiteral("m4a"),
+    QStringLiteral("aac"), QStringLiteral("mp3"), QStringLiteral("mov"),
+    QStringLiteral("webm"), QStringLiteral("ogg"), QStringLiteral("oga"),
+    QStringLiteral("ogv")
+  };
+  if (kind == QStringLiteral("map"))
+    return extension == QStringLiteral("m4s") ? QStringLiteral(".m4s") : QStringLiteral(".mp4");
+  if (kind == QStringLiteral("segment"))
+    return allowedMediaExtensions.contains(extension) ? QStringLiteral(".") + extension : QStringLiteral(".ts");
+
+  if (extension == QStringLiteral("m3u8")) return QStringLiteral(".m3u8");
+  if (extension == QStringLiteral("vtt") || extension == QStringLiteral("webvtt") ||
+      extension == QStringLiteral("srt")) return QStringLiteral(".vtt");
+  if (allowedMediaExtensions.contains(extension)) return QStringLiteral(".") + extension;
+  return QStringLiteral(".bin");
 }
 }
 
@@ -65,7 +98,7 @@ QString HlsGateway::openSession(const QVariantMap &stream) {
   if (!referer.isEmpty()) session.headers.insert(QStringLiteral("Referer"), referer);
   session.expiresAt = QDateTime::currentDateTimeUtc().addSecs(SessionLifetimeMinutes * 60);
   m_sessions.insert(token, session);
-  const auto result = localUrl(token, upstream);
+  const auto result = localUrl(token, upstream, QStringLiteral("playlist"));
   const auto path = result.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
   if (path.size() == 3) m_sessions[token].rootResourceId = path.at(2);
   return result.toString(QUrl::FullyEncoded);
@@ -75,15 +108,18 @@ void HlsGateway::closeSession(const QString &sessionId) { m_sessions.remove(sess
 
 void HlsGateway::closeAll() { m_sessions.clear(); }
 
-QUrl HlsGateway::localUrl(const QString &token, const QUrl &upstream) {
+QUrl HlsGateway::localUrl(const QString &token, const QUrl &upstream, const QString &resourceKind) {
   auto it = m_sessions.find(token);
   if (it == m_sessions.end()) return {};
   const auto normalized = upstream.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment).toString(QUrl::FullyEncoded);
   auto id = it->identifiers.value(normalized);
   if (id.isEmpty()) {
-    id = QString::fromLatin1(QCryptographicHash::hash(normalized.toUtf8(), QCryptographicHash::Sha256).toHex().left(24));
-    int suffix = 0;
-    while (it->resources.contains(id) && it->resources.value(id) != upstream) id = id.section(QLatin1Char('-'), 0, 0) + QStringLiteral("-%1").arg(++suffix);
+    const auto baseId = QString::fromLatin1(QCryptographicHash::hash(normalized.toUtf8(), QCryptographicHash::Sha256).toHex().left(24));
+    const auto suffix = localResourceSuffix(upstream, resourceKind);
+    id = baseId + suffix;
+    int collision = 0;
+    while (it->resources.contains(id) && it->resources.value(id) != upstream)
+      id = baseId + QStringLiteral("-%1").arg(++collision) + suffix;
     it->resources.insert(id, upstream);
     it->identifiers.insert(normalized, id);
   }
@@ -177,6 +213,8 @@ void HlsGateway::proxyResolved(QTcpSocket *socket, const QByteArray &method, con
     auto contentType = reply->header(QNetworkRequest::ContentTypeHeader).toString().toUtf8();
     const auto finalUrl = reply->url().isValid() ? reply->url() : upstream;
     if (method != QByteArrayLiteral("HEAD") && HlsTools::looksLikePlaylist(body, finalUrl)) {
+      for (const auto &resource : HlsTools::resources(body, finalUrl))
+        localUrl(token, resource.url, resource.kind);
       body = HlsTools::rewrite(body, finalUrl, [this, token](const QUrl &url) { return localUrl(token, url); });
       const auto session = m_sessions.constFind(token);
       if (session != m_sessions.cend() && session->rootResourceId == resourceId && !session->subtitles.isEmpty()) {
@@ -184,7 +222,7 @@ void HlsGateway::proxyResolved(QTcpSocket *socket, const QByteArray &method, con
         for (const auto &value : session->subtitles) {
           const auto track = value.toMap();
           const QUrl url(track.value(QStringLiteral("url"), track.value(QStringLiteral("file"))).toString());
-          if (url.isValid()) captions.append({track.value(QStringLiteral("label"), QStringLiteral("Captions")).toString(), localUrl(token, url)});
+          if (url.isValid()) captions.append({track.value(QStringLiteral("label"), QStringLiteral("Captions")).toString(), localUrl(token, url, QStringLiteral("subtitle"))});
         }
         body = HlsTools::addSubtitleTracks(body, captions);
       }

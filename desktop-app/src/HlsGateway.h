@@ -51,7 +51,7 @@ private:
                      const QString &resourceId, const QHash<QByteArray, QByteArray> &incomingHeaders,
                      const QString &publicAddress);
   void resolvePublicAddress(const QString &host, std::function<void(const QString &)> callback);
-  QUrl localUrl(const QString &token, const QUrl &upstream);
+  QUrl localUrl(const QString &token, const QUrl &upstream, const QString &resourceKind = {});
   void sendError(QTcpSocket *socket, int status, const QByteArray &reason);
   static QByteArray reasonFor(int status);
 

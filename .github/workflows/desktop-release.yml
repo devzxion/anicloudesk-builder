@@ -6,7 +6,7 @@ on:
       release_tag:
         description: Release tag
         required: true
-        default: desktop-v4.0.3
+        default: desktop-v4.0.4
   push:
     tags: ["desktop-v*"]
 
