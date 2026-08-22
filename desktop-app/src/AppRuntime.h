@@ -17,6 +17,7 @@ class AppRuntime final : public QObject {
   Q_PROPERTY(int downloadQuality READ downloadQuality WRITE setDownloadQuality NOTIFY preferencesChanged)
   Q_PROPERTY(bool allowMeteredDownloads READ allowMeteredDownloads WRITE setAllowMeteredDownloads NOTIFY preferencesChanged)
   Q_PROPERTY(bool notificationsEnabled READ notificationsEnabled WRITE setNotificationsEnabled NOTIFY preferencesChanged)
+  Q_PROPERTY(bool startAtLogin READ startAtLogin WRITE setStartAtLogin NOTIFY preferencesChanged)
   Q_PROPERTY(bool backgroundLaunch READ backgroundLaunch CONSTANT)
   Q_PROPERTY(bool trayAvailable READ trayAvailable CONSTANT)
   Q_PROPERTY(QString pendingRoute READ pendingRoute NOTIFY pendingRouteChanged)
@@ -32,6 +33,7 @@ public:
   [[nodiscard]] int downloadQuality() const;
   [[nodiscard]] bool allowMeteredDownloads() const;
   [[nodiscard]] bool notificationsEnabled() const;
+  [[nodiscard]] bool startAtLogin() const;
   [[nodiscard]] bool backgroundLaunch() const { return m_backgroundLaunch; }
   [[nodiscard]] bool trayAvailable() const { return m_tray != nullptr; }
   [[nodiscard]] QString pendingRoute() const { return m_pendingRoute; }
@@ -42,6 +44,7 @@ public:
   void setDownloadQuality(int value);
   void setAllowMeteredDownloads(bool value);
   void setNotificationsEnabled(bool value);
+  void setStartAtLogin(bool value);
 
   Q_INVOKABLE void refreshLocalHistory();
   Q_INVOKABLE void deleteLocalHistory(const QString &animeId, const QString &episodeId = {});

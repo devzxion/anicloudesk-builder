@@ -6,7 +6,7 @@ on:
       release_tag:
         description: Release tag
         required: true
-        default: desktop-v4.0.4
+        default: desktop-v4.0.5
   push:
     tags: ["desktop-v*"]
 
@@ -321,6 +321,8 @@ jobs:
             Native AniCloud desktop release for Windows, macOS, and Linux.
 
             Windows and macOS packages are intentionally distributed without a trusted publisher certificate. The operating system may display an Unknown Publisher or unidentified developer warning. Release downloads remain integrity-protected by the signed AniCloud update manifest and published SHA-256 checksums.
+
+            Starting AniCloud at login is disabled by default. Background startup is registered only after the user explicitly enables it in Profile.
           repository: devz-on/anicloudesk
           token: ${{ secrets.RELEASE_GITHUB_TOKEN }}
           files: release-assets/*

@@ -48,8 +48,9 @@ private slots:
   void profileExplainsBackgroundNotifications() {
     QFile profile(QStringLiteral(ANICLOUD_SOURCE_DIR "/qml/pages/ProfilePage.qml")); QVERIFY(profile.open(QIODevice::ReadOnly));
     const auto source = profile.readAll();
-    QVERIFY(source.contains("Background notifications"));
-    QVERIFY(source.contains("Starts quietly with your computer"));
+    QVERIFY(source.contains("Native notifications"));
+    QVERIFY(source.contains("Start AniCloud with my computer"));
+    QVERIFY(source.contains("Startup is off by default"));
   }
 
   void runtimeKeepsNotificationsAliveWithoutTheWindow() {
@@ -58,10 +59,19 @@ private slots:
     const auto runtimeSource = runtime.readAll();
     const auto mainSource = main.readAll();
     QVERIFY(runtimeSource.contains("updateAutoStart"));
+    QVERIFY(runtimeSource.contains("notifications/startAtLogin"));
+    QVERIFY(!runtimeSource.contains("updateAutoStart(notificationsEnabled())"));
     QVERIFY(runtimeSource.contains("lastBroadcastId"));
     QVERIFY(mainSource.contains("--background"));
     QVERIFY(mainSource.contains("QLocalServer"));
     QVERIFY(mainSource.contains("60 * 1000"));
+  }
+
+  void windowsStartupRequiresExplicitConsent() {
+    QFile installer(QStringLiteral(ANICLOUD_SOURCE_DIR "/packaging/windows/installer.nsi")); QVERIFY(installer.open(QIODevice::ReadOnly));
+    const auto source = installer.readAll();
+    QVERIFY(!source.contains("WriteRegStr HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\Run\""));
+    QVERIFY(source.contains("DeleteRegValue HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\Run\""));
   }
 
   void paletteIsCanonical() {

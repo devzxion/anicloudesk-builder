@@ -43,7 +43,6 @@ AppRuntime::AppRuntime(Database *database, bool backgroundLaunch, QObject *paren
     connect(m_tray, &QSystemTrayIcon::messageClicked, this, &AppRuntime::openNotificationLink);
     if (notificationsEnabled()) m_tray->show();
   }
-  updateAutoStart(notificationsEnabled());
   refreshLocalHistory();
 }
 
@@ -54,6 +53,7 @@ QString AppRuntime::playbackQuality() const { return m_settings.value(QStringLit
 int AppRuntime::downloadQuality() const { return m_settings.value(QStringLiteral("downloads/quality"), 1080).toInt(); }
 bool AppRuntime::allowMeteredDownloads() const { return m_settings.value(QStringLiteral("downloads/allowMetered"), false).toBool(); }
 bool AppRuntime::notificationsEnabled() const { return m_settings.value(QStringLiteral("notifications/enabled"), true).toBool(); }
+bool AppRuntime::startAtLogin() const { return m_settings.value(QStringLiteral("notifications/startAtLogin"), false).toBool(); }
 
 void AppRuntime::setRoute(const QString &route) {
   if (route.isEmpty() || m_route == route) return;
@@ -71,8 +71,17 @@ void AppRuntime::setNotificationsEnabled(bool value) {
   if (notificationsEnabled() == value) return;
   m_settings.setValue(QStringLiteral("notifications/enabled"), value);
   m_settings.sync();
-  updateAutoStart(value);
+  if (!value && startAtLogin()) setStartAtLogin(false);
   if (m_tray) value ? m_tray->show() : m_tray->hide();
+  emit preferencesChanged();
+}
+
+void AppRuntime::setStartAtLogin(bool value) {
+  value = value && notificationsEnabled() && m_tray;
+  if (startAtLogin() == value) return;
+  m_settings.setValue(QStringLiteral("notifications/startAtLogin"), value);
+  m_settings.sync();
+  updateAutoStart(value);
   emit preferencesChanged();
 }
 
