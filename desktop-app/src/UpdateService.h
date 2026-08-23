@@ -33,6 +33,7 @@ public:
   Q_INVOKABLE void check();
   Q_INVOKABLE void downloadAndInstall();
   Q_INVOKABLE bool launchInstaller();
+  static int runInstallerHelper(const QString &installerPath, qint64 parentProcessId);
 
   [[nodiscard]] static int compareVersions(const QString &left, const QString &right);
   [[nodiscard]] static bool verifyManifest(const QByteArray &manifest, const QByteArray &signature,

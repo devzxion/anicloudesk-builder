@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(AniCloudDesktop VERSION 4.0.9 LANGUAGES CXX)
+project(AniCloudDesktop VERSION 4.1.0 LANGUAGES CXX)
 
 if(WIN32)
   enable_language(RC)
@@ -175,6 +175,7 @@ set_target_properties(AniCloud PROPERTIES
 
 if(WIN32)
   target_sources(AniCloud PRIVATE resources/windows.rc)
+  target_link_libraries(AniCloud PRIVATE shell32)
   add_executable(AniCloudLauncher WIN32 src/windows_launcher.cpp resources/windows.rc)
   set_target_properties(AniCloudLauncher PROPERTIES
     OUTPUT_NAME "AniCloud"

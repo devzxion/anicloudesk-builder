@@ -144,6 +144,15 @@ private slots:
       "<td class=\"episode-title\"><a href=\"/anime/21/One_Piece/episode/100\">Episode title</a></td></tr>");
     QCOMPARE(ProviderClient::parseEpisodeCountHtml(html), 1174);
     QCOMPARE(ProviderClient::parseEpisodeCountHtml(html, 1200), 1200);
+    QCOMPARE(ProviderClient::parseLastEpisodeOffsetHtml(html), 1100);
+  }
+
+  void ignoresUnrelatedOffsetsWhenLocatingEpisodeTail() {
+    const auto html = QStringLiteral(
+      "<a href=\"/anime.php?offset=2900\">Catalog</a>"
+      "<a href=\"https://attacker.example/anime/21/One_Piece/episode?offset=2800\">Untrusted</a>"
+      "<a href=\"/anime/21/One_Piece/episode?offset=1100\">1101 - 1174</a>");
+    QCOMPARE(ProviderClient::parseLastEpisodeOffsetHtml(html), 1100);
   }
 
   void infersEpisodeCountWithoutPagination() {

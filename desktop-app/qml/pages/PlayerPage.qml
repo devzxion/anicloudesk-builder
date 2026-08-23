@@ -47,6 +47,11 @@ Rectangle {
         lockHelpPopup.close()
         revealControls()
     }
+    function chooseCaption(trackIndex) {
+        Player.selectCaption(trackIndex)
+        captionsPopup.close()
+        revealControls()
+    }
     function time(ms) {
         const total = Math.max(0, Math.floor(ms / 1000))
         const hours = Math.floor(total / 3600)
@@ -350,17 +355,19 @@ Rectangle {
             Button {
                 Layout.fillWidth: true; Layout.preferredHeight: 42
                 text: (!Player.captionsEnabled ? "✓  " : "") + "Captions off"; flat: true
-                palette.buttonText: "white"; onClicked: { Player.selectCaption(-1); captionsPopup.close() }
+                palette.buttonText: "white"; onClicked: root.chooseCaption(-1)
             }
             ListView {
                 id: captionList
                 Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                 model: Player.captions
                 delegate: Button {
+                    required property int index
                     required property var modelData
                     width: captionList.width; height: 42; flat: true
                     text: (Player.captionsEnabled && Player.selectedCaptionIndex === index ? "✓  " : "") + (modelData.label || ("Captions " + (index + 1))); palette.buttonText: "white"
-                    onClicked: { Player.selectCaption(index); captionsPopup.close() }
+                    onClicked: root.chooseCaption(index)
+                    Accessible.name: modelData.label || ("Captions " + (index + 1))
                 }
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
             }

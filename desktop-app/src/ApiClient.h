@@ -71,6 +71,7 @@ public:
   static QVariantMap parseTaxonomyHtml(const QString &html);
   static QVariantList parseEpisodeNamesHtml(const QString &html, const QString &animeId);
   static int parseEpisodeCountHtml(const QString &html, int fallback = 0);
+  static int parseLastEpisodeOffsetHtml(const QString &html);
   static QString parseEpisodeListingUrlHtml(const QString &html, const QString &animeId);
   static QVariantMap parseAnimeDetailsHtml(const QString &html, const QString &animeId,
                                            QVariantList *recommendations = nullptr);
@@ -96,6 +97,7 @@ private:
   void applyEpisodes(const QString &animeId, int episodeCount);
   void loadEpisodeTitlesPage(const QString &animeId, const QUrl &episodeUrl,
                              int offset, int episodeCount);
+  void loadEpisodeTailPage(const QString &animeId, const QUrl &episodeUrl, int offset);
   void setError(const QString &error);
   static QJsonObject payload(const QJsonObject &root);
 
@@ -114,6 +116,7 @@ private:
   QVariantList m_recommendations;
   QVariantList m_subServers;
   QVariantList m_dubServers;
+  int m_authoritativeEpisodeCount = 0;
   bool m_searchHasMore = false;
 };
 

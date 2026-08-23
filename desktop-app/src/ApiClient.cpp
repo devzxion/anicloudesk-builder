@@ -147,6 +147,8 @@ QList<QPair<QByteArray, QByteArray>> malHeaders() {
     {QByteArrayLiteral("Accept"), QByteArrayLiteral("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")},
     {QByteArrayLiteral("Accept-Language"), QByteArrayLiteral("en-US,en;q=0.9")},
     {QByteArrayLiteral("Referer"), QByteArrayLiteral("https://myanimelist.net/")},
+    {QByteArrayLiteral("Cache-Control"), QByteArrayLiteral("no-cache")},
+    {QByteArrayLiteral("Pragma"), QByteArrayLiteral("no-cache")},
   };
 }
 
@@ -440,6 +442,21 @@ int ProviderClient::parseEpisodeCountHtml(const QString &html, int fallback) {
   return qBound(0, maximum, 3000);
 }
 
+int ProviderClient::parseLastEpisodeOffsetHtml(const QString &html) {
+  int maximum = 0;
+  auto anchors = rx(QStringLiteral("<a\\b[^>]*href\\s*=\\s*[\\\"']([^\\\"']+)[\\\"'][^>]*>"))
+                   .globalMatch(html);
+  while (anchors.hasNext()) {
+    const QUrl url = QUrl(MalBaseUrl).resolved(QUrl(htmlText(anchors.next().captured(1))));
+    if (url.host().compare(QStringLiteral("myanimelist.net"), Qt::CaseInsensitive) != 0 ||
+        !url.path().endsWith(QStringLiteral("/episode"), Qt::CaseInsensitive)) continue;
+    bool ok = false;
+    const auto offset = QUrlQuery(url).queryItemValue(QStringLiteral("offset")).toInt(&ok);
+    if (ok) maximum = qMax(maximum, offset);
+  }
+  return qBound(0, maximum, 3000);
+}
+
 QString ProviderClient::parseEpisodeListingUrlHtml(const QString &html, const QString &animeId) {
   const auto escapedId = QRegularExpression::escape(animeId);
   const QRegularExpression pathExpression(
@@ -657,7 +674,9 @@ void ProviderClient::browseGenre(int id, const QString &slug, int page) {
 }
 
 void ProviderClient::loadDetails(const QString &animeId) {
-  m_details.clear(); m_episodes.clear(); m_recommendations.clear(); emit detailsChanged();
+  m_details.clear(); m_episodes.clear(); m_recommendations.clear();
+  m_authoritativeEpisodeCount = 0;
+  emit detailsChanged();
   const auto url = providerUrl(MalBaseUrl, QStringLiteral("/anime/%1").arg(
     QString::fromUtf8(QUrl::toPercentEncoding(animeId))));
   getText(url, malHeaders(), [this, animeId](const QByteArray &body, const QUrl &finalUrl) {
@@ -712,9 +731,12 @@ void ProviderClient::loadEpisodeTitlesPage(const QString &animeId, const QUrl &e
     if (m_details.value(QStringLiteral("id")).toString() != animeId) return;
     const auto html = QString::fromUtf8(body);
     const auto named = parseEpisodeNamesHtml(html, animeId);
-    int resolvedCount = parseEpisodeCountHtml(html, episodeCount);
+    int resolvedCount = m_authoritativeEpisodeCount > 0
+      ? m_authoritativeEpisodeCount
+      : parseEpisodeCountHtml(html, episodeCount);
     for (const auto &value : named)
       resolvedCount = qMax(resolvedCount, value.toMap().value(QStringLiteral("number")).toInt());
+    if (m_authoritativeEpisodeCount > 0) m_authoritativeEpisodeCount = resolvedCount;
     resolvedCount = qBound(1, resolvedCount, 3000);
     applyEpisodes(animeId, resolvedCount);
     m_details.insert(QStringLiteral("episodes"), resolvedCount);
@@ -730,6 +752,10 @@ void ProviderClient::loadEpisodeTitlesPage(const QString &animeId, const QUrl &e
       m_episodes[index] = episode;
     }
     emit detailsChanged();
+    if (offset == 0) {
+      const auto tailOffset = parseLastEpisodeOffsetHtml(html);
+      if (tailOffset > 0) loadEpisodeTailPage(animeId, episodeUrl, tailOffset);
+    }
     const auto nextOffset = offset + 100;
     if (!named.isEmpty() && nextOffset < resolvedCount)
       loadEpisodeTitlesPage(animeId, episodeUrl, nextOffset, resolvedCount);
@@ -741,6 +767,40 @@ void ProviderClient::loadEpisodeTitlesPage(const QString &animeId, const QUrl &e
     m_details.insert(QStringLiteral("subEpisodes"), fallbackCount);
     emit detailsChanged();
   }, false, offset == 0);
+}
+
+void ProviderClient::loadEpisodeTailPage(const QString &animeId, const QUrl &episodeUrl, int offset) {
+  auto pageUrl = episodeUrl;
+  QUrlQuery query;
+  query.addQueryItem(QStringLiteral("offset"), QString::number(qMax(0, offset)));
+  pageUrl.setQuery(query);
+  getText(pageUrl, malHeaders(), [this, animeId](const QByteArray &body, const QUrl &) {
+    if (m_details.value(QStringLiteral("id")).toString() != animeId) return;
+    const auto html = QString::fromUtf8(body);
+    const auto named = parseEpisodeNamesHtml(html, animeId);
+    int exactCount = parseEpisodeCountHtml(html);
+    for (const auto &value : named)
+      exactCount = qMax(exactCount, value.toMap().value(QStringLiteral("number")).toInt());
+    if (exactCount <= 0) return;
+
+    // The final listing page is authoritative for an airing title. It may
+    // legitimately be newer than the details/search metadata cached by MAL.
+    m_authoritativeEpisodeCount = exactCount;
+    applyEpisodes(animeId, exactCount);
+    m_details.insert(QStringLiteral("episodes"), exactCount);
+    m_details.insert(QStringLiteral("subEpisodes"), exactCount);
+    for (const auto &value : named) {
+      const auto item = value.toMap();
+      const auto index = item.value(QStringLiteral("number")).toInt() - 1;
+      if (index < 0 || index >= m_episodes.size()) continue;
+      auto episode = m_episodes.at(index).toMap();
+      episode.insert(QStringLiteral("title"), item.value(QStringLiteral("title")));
+      episode.insert(QStringLiteral("episodeName"), item.value(QStringLiteral("episodeName")));
+      episode.insert(QStringLiteral("alternativeTitle"), item.value(QStringLiteral("alternativeTitle")));
+      m_episodes[index] = episode;
+    }
+    emit detailsChanged();
+  }, {}, false, false);
 }
 
 void ProviderClient::loadEpisodes(const QString &animeId, int offset, int limit) {

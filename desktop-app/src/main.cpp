@@ -47,6 +47,15 @@ int main(int argc, char *argv[]) {
   QApplication::setApplicationVersion(QStringLiteral(ANICLOUD_VERSION));
   QQuickStyle::setStyle(QStringLiteral("Basic"));
   QApplication app(argc, argv);
+  const auto helperIndex = app.arguments().indexOf(QStringLiteral("--update-installer-helper"));
+  if (helperIndex >= 0) {
+    if (helperIndex + 2 >= app.arguments().size()) return 2;
+    bool validProcessId = false;
+    const auto parentProcessId = app.arguments().at(helperIndex + 2).toLongLong(&validProcessId);
+    return validProcessId
+      ? UpdateService::runInstallerHelper(app.arguments().at(helperIndex + 1), parentProcessId)
+      : 2;
+  }
   QNetworkInformation::loadDefaultBackend();
   const bool smokeTest = app.arguments().contains(QStringLiteral("--smoke-test"));
   const bool backgroundLaunch = app.arguments().contains(QStringLiteral("--background"));

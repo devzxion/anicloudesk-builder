@@ -5,7 +5,7 @@ Unicode true
 ${StrLoc}
 
 !define PRODUCT_NAME "AniCloud"
-!define PRODUCT_VERSION "4.0.9"
+!define PRODUCT_VERSION "4.1.0"
 !define PRODUCT_ID "ink.anicloud.desktop"
 
 Name "${PRODUCT_NAME}"
@@ -36,7 +36,9 @@ ensure_anicloud_closed_retry:
   ${StrLoc} $2 $1 '"AniCloud.exe"' ">"
   StrCmp $2 "" ensure_anicloud_closed_done
 
-  nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /IM AniCloud.exe /T /F'
+  ; Never use /T here: an older AniCloud release may have launched this
+  ; installer as its child, and tree termination would kill the installer too.
+  nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /IM AniCloud.exe /F'
   Pop $0
   Pop $1
   Sleep 1200

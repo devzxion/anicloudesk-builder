@@ -24,6 +24,9 @@ private slots:
     QVERIFY(playerSource.contains("Player.subtitleText"));
     QVERIFY(playerSource.contains("Player.captionStatus"));
     QVERIFY(playerSource.contains("Player.toggleCaptions()"));
+    QVERIFY(playerSource.contains("function chooseCaption(trackIndex)"));
+    QVERIFY(playerSource.contains("required property int index"));
+    QVERIFY(playerSource.contains("onClicked: root.chooseCaption(index)"));
     QVERIFY(playerSource.contains("Caption appearance"));
     QVERIFY(playerSource.contains("Runtime.captionScale"));
     QVERIFY(playerSource.contains("Runtime.captionColor"));
@@ -96,10 +99,13 @@ private slots:
     QVERIFY(installerSource.contains("taskkill.exe"));
     QVERIFY(installerSource.contains("tasklist.exe"));
     QVERIFY(installerSource.contains("MB_RETRYCANCEL"));
+    QVERIFY(!installerSource.contains("/T /F"));
     QVERIFY(update.readAll().contains("installerStarted"));
     const auto mainSource = main.readAll();
     QVERIFY(mainSource.contains("UpdateService::installerStarted"));
     QVERIFY(mainSource.contains("QCoreApplication::quit"));
+    QVERIFY(mainSource.contains("--update-installer-helper"));
+    QVERIFY(mainSource.contains("runInstallerHelper"));
   }
 
   void downloadsPersistTheResolvedEpisodeIdentity() {

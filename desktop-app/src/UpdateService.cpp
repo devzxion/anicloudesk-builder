@@ -3,7 +3,9 @@
 #include "BuildConfig.h"
 
 #include <QCryptographicHash>
+#include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -12,9 +14,20 @@
 #include <QNetworkRequest>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QMessageBox>
 #include <QStandardPaths>
 #include <QSysInfo>
+#include <QThread>
 #include <sodium.h>
+
+#if defined(Q_OS_WIN)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <shellapi.h>
+#else
+#include <cerrno>
+#include <csignal>
+#endif
 
 namespace {
 QUrl releaseUrl(const QString &name) {
@@ -28,6 +41,44 @@ QList<int> versionParts(const QString &version) {
   for (const auto &part : clean.split(QLatin1Char('.'))) result.append(part.toInt());
   while (result.size() < 3) result.append(0);
   return result;
+}
+
+bool processIsRunning(qint64 processId) {
+  if (processId <= 0) return false;
+#if defined(Q_OS_WIN)
+  const HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(processId));
+  if (!process) return GetLastError() == ERROR_ACCESS_DENIED;
+  const bool running = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+  CloseHandle(process);
+  return running;
+#else
+  return ::kill(static_cast<pid_t>(processId), 0) == 0 || errno == EPERM;
+#endif
+}
+
+bool launchInstallerDirect(const QString &installerPath) {
+#if defined(Q_OS_WIN)
+  const auto file = QDir::toNativeSeparators(installerPath).toStdWString();
+  const auto directory = QDir::toNativeSeparators(QFileInfo(installerPath).absolutePath()).toStdWString();
+  SHELLEXECUTEINFOW execute{};
+  execute.cbSize = sizeof(execute);
+  execute.fMask = SEE_MASK_NOCLOSEPROCESS;
+  execute.lpVerb = L"runas";
+  execute.lpFile = file.c_str();
+  execute.lpDirectory = directory.c_str();
+  execute.nShow = SW_SHOWNORMAL;
+  if (!ShellExecuteExW(&execute)) return false;
+  if (execute.hProcess) CloseHandle(execute.hProcess);
+  return true;
+#elif defined(Q_OS_MACOS)
+  return QProcess::startDetached(QStringLiteral("open"), {installerPath});
+#else
+  if (installerPath.endsWith(QStringLiteral(".AppImage"), Qt::CaseInsensitive)) {
+    QFile::setPermissions(installerPath, QFile::permissions(installerPath) | QFileDevice::ExeUser);
+    return QProcess::startDetached(installerPath, {});
+  }
+  return QProcess::startDetached(QStringLiteral("xdg-open"), {installerPath});
+#endif
 }
 }
 
@@ -182,25 +233,44 @@ bool UpdateService::launchInstaller() {
     return false;
   }
   setError({});
-  bool launched = false;
-#if defined(Q_OS_WIN)
-  launched = QProcess::startDetached(m_installerPath, {});
-#elif defined(Q_OS_MACOS)
-  launched = QProcess::startDetached(QStringLiteral("open"), {m_installerPath});
-#else
-  if (m_installerPath.endsWith(QStringLiteral(".AppImage"), Qt::CaseInsensitive)) {
-    QFile::setPermissions(m_installerPath, QFile::permissions(m_installerPath) | QFileDevice::ExeUser);
-    launched = QProcess::startDetached(m_installerPath, {});
-  } else {
-    launched = QProcess::startDetached(QStringLiteral("xdg-open"), {m_installerPath});
-  }
-#endif
+  const bool launched = QProcess::startDetached(
+    QCoreApplication::applicationFilePath(),
+    {QStringLiteral("--update-installer-helper"), m_installerPath,
+     QString::number(QCoreApplication::applicationPid())},
+    QCoreApplication::applicationDirPath());
   if (!launched) {
-    setError(QStringLiteral("The installer could not be started. Close AniCloud and choose Launch installer to retry."));
+    setError(QStringLiteral("The update helper could not be started. Keep AniCloud open and choose Launch installer to retry."));
     setStatus(QStringLiteral("ready"));
     return false;
   }
   setStatus(QStringLiteral("installing"));
   emit installerStarted();
   return true;
+}
+
+int UpdateService::runInstallerHelper(const QString &installerPath, qint64 parentProcessId) {
+  if (installerPath.isEmpty() || !QFileInfo::exists(installerPath)) {
+    QMessageBox::critical(nullptr, QStringLiteral("AniCloud update"),
+                          QStringLiteral("The verified installer is missing. Reopen AniCloud and download the update again."));
+    return 2;
+  }
+
+  while (processIsRunning(parentProcessId)) {
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < 15'000 && processIsRunning(parentProcessId)) QThread::msleep(100);
+    if (!processIsRunning(parentProcessId)) break;
+    const auto choice = QMessageBox::warning(
+      nullptr, QStringLiteral("Close AniCloud to update"),
+      QStringLiteral("AniCloud is still running. Close it from the tray or Task Manager, then choose Retry."),
+      QMessageBox::Retry | QMessageBox::Cancel, QMessageBox::Retry);
+    if (choice != QMessageBox::Retry) return 3;
+  }
+
+  if (!launchInstallerDirect(installerPath)) {
+    QMessageBox::critical(nullptr, QStringLiteral("AniCloud update"),
+                          QStringLiteral("The installer could not be started. Reopen AniCloud and try the update again."));
+    return 4;
+  }
+  return 0;
 }
