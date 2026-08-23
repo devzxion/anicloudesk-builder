@@ -333,7 +333,7 @@ void DownloadManager::fetchManifest(Job *job, const QUrl &url, bool selectVarian
   for (auto it = job->headers.cbegin(); it != job->headers.cend(); ++it) request.setRawHeader(it.key().toUtf8(), it.value().toString().toUtf8());
   auto *reply = m_network.get(request);
   job->active.insert(reply, {url, QStringLiteral("offline.m3u8"), {}, QStringLiteral("root-playlist")});
-  connect(reply, &QNetworkReply::finished, this, [this, job, reply, selectVariant, attempt] {
+  connect(reply, &QNetworkReply::finished, this, [this, job, reply, url, selectVariant, attempt] {
     job->active.remove(reply);
     if (job->cancelled || job->paused) { reply->deleteLater(); return; }
     const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
