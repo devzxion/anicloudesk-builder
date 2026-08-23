@@ -79,6 +79,13 @@ int main(int argc, char *argv[]) {
   DownloadManager downloads(&database, &account, &provider);
   UpdateService updates;
   AppRuntime runtime(&database, backgroundLaunch);
+  QObject::connect(&updates, &UpdateService::installerStarted, &app, [&app, &player] {
+    // The installer owns the retry prompt if an unrelated/stuck AniCloud
+    // process remains. This instance always saves playback and leaves the
+    // tray before installed files are replaced.
+    player.close();
+    QTimer::singleShot(150, &app, &QCoreApplication::quit);
+  });
   if (backgroundLaunch && (!runtime.notificationsEnabled() || !runtime.trayAvailable()))
     QTimer::singleShot(0, &app, &QCoreApplication::quit);
   DeepLinkEventFilter deepLinkFilter(&runtime);

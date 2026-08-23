@@ -17,6 +17,7 @@ PlayerController::PlayerController(ProviderClient *provider, AccountClient *acco
   m_player.setAudioOutput(&m_audio);
   m_volume = qBound(0.0, QSettings().value(QStringLiteral("playback/volume"), 0.8).toDouble(), 1.0);
   m_volumeBoost = qBound(1.0, QSettings().value(QStringLiteral("playback/volumeBoost"), 1.0).toDouble(), 2.0);
+  m_captionsEnabled = QSettings().value(QStringLiteral("playback/captionsEnabled"), true).toBool();
   applyAudioGain();
   m_quality = QSettings().value(QStringLiteral("playback/quality"), QStringLiteral("auto")).toString().toLower();
   connect(&m_player, &QMediaPlayer::positionChanged, this, [this](qint64 position) {
@@ -276,31 +277,32 @@ void PlayerController::toggleMuted() { setMuted(!muted()); }
 void PlayerController::setCaptionsEnabled(bool enabled) {
   const bool changed = m_captionsEnabled != enabled;
   m_captionsEnabled = enabled;
+  QSettings().setValue(QStringLiteral("playback/captionsEnabled"), enabled);
   if (!enabled) {
+    cancelCaptionRequest();
     m_player.setActiveSubtitleTrack(-1);
     if (!m_subtitleText.isEmpty()) m_subtitleText.clear();
     setCaptionStatus(QStringLiteral("off"));
-  } else if (!m_player.subtitleTracks().isEmpty()) {
-    const auto preferred = m_restoreCaptionIndex >= 0
-      ? qMin(m_restoreCaptionIndex, m_player.subtitleTracks().size() - 1)
-      : qMax(0, m_player.activeSubtitleTrack());
-    m_player.setActiveSubtitleTrack(preferred);
-    m_restoreCaptionIndex = -1;
-  }
-  if (enabled) {
-    if (m_subtitleCues.isEmpty() && !m_captions.isEmpty())
-      loadCaption(m_selectedCaptionIndex < 0 ? 0 : m_selectedCaptionIndex);
-    else {
-      setCaptionStatus(m_subtitleCues.isEmpty() ? QStringLiteral("loading") : QStringLiteral("ready"));
-      updateSubtitleText(position());
-    }
+  } else {
+    const int preferred = m_selectedCaptionIndex >= 0
+      ? qMin(m_selectedCaptionIndex, static_cast<int>(m_captions.size()) - 1)
+      : 0;
+    if (!m_player.subtitleTracks().isEmpty())
+      m_player.setActiveSubtitleTrack(qMin(qMax(0, preferred), m_player.subtitleTracks().size() - 1));
+    if (!m_captions.isEmpty())
+      loadCaption(qMax(0, preferred));
+    else
+      setCaptionStatus(QStringLiteral("off"));
   }
   if (changed) emit captionsChanged();
 }
 
+void PlayerController::toggleCaptions() { setCaptionsEnabled(!m_captionsEnabled); }
+
 void PlayerController::selectCaption(int index) {
   if (index >= 0 && index < m_captions.size()) {
     m_captionsEnabled = true;
+    QSettings().setValue(QStringLiteral("playback/captionsEnabled"), true);
     m_selectedCaptionIndex = index;
     m_restoreCaptionIndex = index;
     if (index < m_player.subtitleTracks().size()) {
@@ -309,14 +311,8 @@ void PlayerController::selectCaption(int index) {
     }
     loadCaption(index);
   } else {
-    m_captionsEnabled = false;
-    m_restoreCaptionIndex = -1;
-    m_selectedCaptionIndex = -1;
-    cancelCaptionRequest();
-    m_subtitleCues.clear();
-    m_subtitleText.clear();
-    setCaptionStatus(QStringLiteral("off"));
-    m_player.setActiveSubtitleTrack(-1);
+    setCaptionsEnabled(false);
+    return;
   }
   emit captionsChanged();
 }

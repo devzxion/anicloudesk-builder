@@ -84,6 +84,7 @@ public:
   Q_INVOKABLE void setMuted(bool muted);
   Q_INVOKABLE void toggleMuted();
   Q_INVOKABLE void setCaptionsEnabled(bool enabled);
+  Q_INVOKABLE void toggleCaptions();
   Q_INVOKABLE void selectCaption(int index);
   Q_INVOKABLE void switchServer(const QString &server);
   Q_INVOKABLE void switchAudio(const QString &audioMode);

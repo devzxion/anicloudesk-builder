@@ -15,6 +15,10 @@ class AppRuntime final : public QObject {
   Q_PROPERTY(QString audioPreference READ audioPreference WRITE setAudioPreference NOTIFY preferencesChanged)
   Q_PROPERTY(QString playbackQuality READ playbackQuality WRITE setPlaybackQuality NOTIFY preferencesChanged)
   Q_PROPERTY(QString serverPreference READ serverPreference WRITE setServerPreference NOTIFY preferencesChanged)
+  Q_PROPERTY(double captionScale READ captionScale WRITE setCaptionScale NOTIFY preferencesChanged)
+  Q_PROPERTY(QString captionColor READ captionColor WRITE setCaptionColor NOTIFY preferencesChanged)
+  Q_PROPERTY(double captionBackgroundOpacity READ captionBackgroundOpacity WRITE setCaptionBackgroundOpacity NOTIFY preferencesChanged)
+  Q_PROPERTY(bool captionOutline READ captionOutline WRITE setCaptionOutline NOTIFY preferencesChanged)
   Q_PROPERTY(int downloadQuality READ downloadQuality WRITE setDownloadQuality NOTIFY preferencesChanged)
   Q_PROPERTY(bool allowMeteredDownloads READ allowMeteredDownloads WRITE setAllowMeteredDownloads NOTIFY preferencesChanged)
   Q_PROPERTY(bool notificationsEnabled READ notificationsEnabled WRITE setNotificationsEnabled NOTIFY preferencesChanged)
@@ -32,6 +36,10 @@ public:
   [[nodiscard]] QString audioPreference() const;
   [[nodiscard]] QString playbackQuality() const;
   [[nodiscard]] QString serverPreference() const;
+  [[nodiscard]] double captionScale() const;
+  [[nodiscard]] QString captionColor() const;
+  [[nodiscard]] double captionBackgroundOpacity() const;
+  [[nodiscard]] bool captionOutline() const;
   [[nodiscard]] int downloadQuality() const;
   [[nodiscard]] bool allowMeteredDownloads() const;
   [[nodiscard]] bool notificationsEnabled() const;
@@ -44,6 +52,10 @@ public:
   void setAudioPreference(const QString &value);
   void setPlaybackQuality(const QString &value);
   void setServerPreference(const QString &value);
+  void setCaptionScale(double value);
+  void setCaptionColor(const QString &value);
+  void setCaptionBackgroundOpacity(double value);
+  void setCaptionOutline(bool value);
   void setDownloadQuality(int value);
   void setAllowMeteredDownloads(bool value);
   void setNotificationsEnabled(bool value);

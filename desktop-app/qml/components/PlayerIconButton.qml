@@ -8,6 +8,7 @@ Button {
     property string tooltip: ""
     property int iconSize: 23
     property bool emphasized: false
+    property bool selected: false
     implicitWidth: emphasized ? 62 : 44
     implicitHeight: emphasized ? 62 : 44
     hoverEnabled: true
@@ -23,9 +24,11 @@ Button {
     background: Rectangle {
         radius: width / 2
         color: root.emphasized ? (root.down ? "#C40710" : Theme.red)
-                               : root.down ? "#55FFFFFF" : root.hovered || root.activeFocus ? "#32FFFFFF" : "transparent"
-        border.width: root.activeFocus ? 2 : 0
-        border.color: "white"
+                               : root.down ? "#55FFFFFF"
+                               : root.selected ? "#30FFFFFF"
+                               : root.hovered || root.activeFocus ? "#32FFFFFF" : "transparent"
+        border.width: root.activeFocus ? 2 : root.selected ? 1 : 0
+        border.color: root.selected ? "#8AFFFFFF" : "white"
         Behavior on color { ColorAnimation { duration: 90 } }
     }
     ToolTip.visible: hovered && tooltip.length > 0

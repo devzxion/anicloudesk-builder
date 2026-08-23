@@ -23,6 +23,11 @@ private slots:
     QVERIFY(playerSource.contains("videoOutput.videoSink.subtitleText"));
     QVERIFY(playerSource.contains("Player.subtitleText"));
     QVERIFY(playerSource.contains("Player.captionStatus"));
+    QVERIFY(playerSource.contains("Player.toggleCaptions()"));
+    QVERIFY(playerSource.contains("Caption appearance"));
+    QVERIFY(playerSource.contains("Runtime.captionScale"));
+    QVERIFY(playerSource.contains("Runtime.captionColor"));
+    QVERIFY(playerSource.contains("Runtime.captionBackgroundOpacity"));
     QVERIFY(playerSource.contains("uiLocked"));
     QVERIFY(playerSource.contains("onDoubleClicked: root.unlockPlayerUi()"));
     QVERIFY(playerSource.contains("Double-click the lock to unlock"));
@@ -81,6 +86,20 @@ private slots:
     const auto source = installer.readAll();
     QVERIFY(!source.contains("WriteRegStr HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\Run\""));
     QVERIFY(source.contains("DeleteRegValue HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\Run\""));
+  }
+
+  void updateInstallationClosesBackgroundProcessAndCanRetry() {
+    QFile installer(QStringLiteral(ANICLOUD_SOURCE_DIR "/packaging/windows/installer.nsi")); QVERIFY(installer.open(QIODevice::ReadOnly));
+    QFile update(QStringLiteral(ANICLOUD_SOURCE_DIR "/src/UpdateService.cpp")); QVERIFY(update.open(QIODevice::ReadOnly));
+    QFile main(QStringLiteral(ANICLOUD_SOURCE_DIR "/src/main.cpp")); QVERIFY(main.open(QIODevice::ReadOnly));
+    const auto installerSource = installer.readAll();
+    QVERIFY(installerSource.contains("taskkill.exe"));
+    QVERIFY(installerSource.contains("tasklist.exe"));
+    QVERIFY(installerSource.contains("MB_RETRYCANCEL"));
+    QVERIFY(update.readAll().contains("installerStarted"));
+    const auto mainSource = main.readAll();
+    QVERIFY(mainSource.contains("UpdateService::installerStarted"));
+    QVERIFY(mainSource.contains("QCoreApplication::quit"));
   }
 
   void downloadsPersistTheResolvedEpisodeIdentity() {

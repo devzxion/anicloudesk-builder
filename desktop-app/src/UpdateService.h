@@ -41,6 +41,7 @@ public:
                                                const QString &architecture);
 
 signals:
+  void installerStarted();
   void statusChanged();
   void errorChanged();
   void checkingChanged();

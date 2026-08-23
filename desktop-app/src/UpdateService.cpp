@@ -176,16 +176,31 @@ void UpdateService::downloadAndInstall() {
 }
 
 bool UpdateService::launchInstaller() {
-  if (m_installerPath.isEmpty() || !QFileInfo::exists(m_installerPath)) return false;
+  if (m_installerPath.isEmpty() || !QFileInfo::exists(m_installerPath)) {
+    setError(QStringLiteral("The verified installer is no longer available. Download the update again."));
+    setStatus(QStringLiteral("failed"));
+    return false;
+  }
+  setError({});
+  bool launched = false;
 #if defined(Q_OS_WIN)
-  return QProcess::startDetached(m_installerPath, {});
+  launched = QProcess::startDetached(m_installerPath, {});
 #elif defined(Q_OS_MACOS)
-  return QProcess::startDetached(QStringLiteral("open"), {m_installerPath});
+  launched = QProcess::startDetached(QStringLiteral("open"), {m_installerPath});
 #else
   if (m_installerPath.endsWith(QStringLiteral(".AppImage"), Qt::CaseInsensitive)) {
     QFile::setPermissions(m_installerPath, QFile::permissions(m_installerPath) | QFileDevice::ExeUser);
-    return QProcess::startDetached(m_installerPath, {});
+    launched = QProcess::startDetached(m_installerPath, {});
+  } else {
+    launched = QProcess::startDetached(QStringLiteral("xdg-open"), {m_installerPath});
   }
-  return QProcess::startDetached(QStringLiteral("xdg-open"), {m_installerPath});
 #endif
+  if (!launched) {
+    setError(QStringLiteral("The installer could not be started. Close AniCloud and choose Launch installer to retry."));
+    setStatus(QStringLiteral("ready"));
+    return false;
+  }
+  setStatus(QStringLiteral("installing"));
+  emit installerStarted();
+  return true;
 }

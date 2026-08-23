@@ -129,7 +129,14 @@ ApplicationWindow {
             Text { text: "A newer signed desktop release was verified. Update to continue using AniCloud."; color: Theme.muted; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter; Layout.fillWidth: true }
             ProgressBar { visible: Updates.status === "downloading"; from: 0; to: 1; value: Updates.progress; Layout.fillWidth: true; palette.highlight: Theme.red }
             Text { visible: Updates.error.length > 0; text: Updates.error; color: Theme.red; wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter; Layout.fillWidth: true }
-            AppButton { Layout.alignment: Qt.AlignHCenter; text: Updates.status === "downloading" ? "Downloading…" : Updates.status === "ready" ? "Launch installer" : "Download verified update"; enabled: Updates.status !== "downloading"; onClicked: Updates.status === "ready" ? Updates.launchInstaller() : Updates.downloadAndInstall() }
+            AppButton {
+                Layout.alignment: Qt.AlignHCenter
+                text: Updates.status === "downloading" ? "Downloading…"
+                    : Updates.status === "installing" ? "Starting installer…"
+                    : Updates.status === "ready" ? "Launch installer" : "Download verified update"
+                enabled: Updates.status !== "downloading" && Updates.status !== "installing"
+                onClicked: Updates.status === "ready" ? Updates.launchInstaller() : Updates.downloadAndInstall()
+            }
         }
     }
 

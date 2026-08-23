@@ -13,7 +13,7 @@ Rectangle {
     property bool uiLocked: false
     property bool lockButtonVisible: false
     readonly property bool compact: width < 920
-    readonly property bool controlsPinned: scrubbing || captionsPopup.opened || settingsPopup.opened || !Player.playing
+    readonly property bool controlsPinned: scrubbing || captionsPopup.opened || captionAppearancePopup.opened || settingsPopup.opened || !Player.playing
     readonly property bool initialBuffering: (Player.state === "loading" || Player.state === "resolving" || Player.state === "buffering") && Player.position < 500
     readonly property bool canSkipIntro: Player.introEnd > Player.introStart && Player.position >= Player.introStart && Player.position < Player.introEnd
     readonly property bool canSkipOutro: Player.outroEnd > Player.outroStart && Player.position >= Player.outroStart && Player.position < Player.outroEnd
@@ -37,6 +37,7 @@ Rectangle {
         uiLocked = true
         controlsVisible = false
         captionsPopup.close()
+        captionAppearancePopup.close()
         settingsPopup.close()
         revealLockButton()
     }
@@ -247,7 +248,7 @@ Rectangle {
                 }
                 PlayerIconButton {
                     iconName: "captions"; tooltip: "Captions (C)"; enabled: Player.captions.length > 0
-                    emphasized: Player.captionsEnabled && Player.selectedCaptionIndex >= 0
+                    selected: Player.captionsEnabled && Player.selectedCaptionIndex >= 0
                     onClicked: { root.revealControls(); captionsPopup.open() }
                 }
                 AppButton {
@@ -275,14 +276,14 @@ Rectangle {
         anchors.bottomMargin: !root.uiLocked && root.controlsVisible ? 150 : 42
         width: Math.min(parent.width - 80, 900)
         height: subtitleText.implicitHeight + 18
-        radius: 6; color: "#B8000000"; z: 5
+        radius: 6; color: Qt.rgba(0, 0, 0, Runtime.captionBackgroundOpacity); z: 5
         visible: Player.captionsEnabled && cue.length > 0
         Text {
             id: subtitleText
             anchors.fill: parent; anchors.margins: 9
             text: subtitleBackdrop.cue; textFormat: Text.PlainText
-            color: "white"; font.pixelSize: root.compact ? 18 : 22; font.weight: Font.DemiBold
-            style: Text.Outline; styleColor: "black"
+            color: Runtime.captionColor; font.pixelSize: (root.compact ? 18 : 22) * Runtime.captionScale; font.weight: Font.DemiBold
+            style: Runtime.captionOutline ? Text.Outline : Text.Normal; styleColor: "black"
             wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
         }
     }
@@ -332,31 +333,83 @@ Rectangle {
     Popup {
         id: captionsPopup
         x: Math.max(18, root.width - width - 116); y: Math.max(18, root.height - bottomShade.height - height + 18)
-        width: 250; height: Math.min(340, 94 + Player.captions.length * 43)
+        width: 278; height: Math.min(410, 144 + Player.captions.length * 43)
         modal: false; focus: true; padding: 8
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         onClosed: root.revealControls()
         background: Rectangle { color: "#F21A1A1E"; radius: 12; border.color: "#4AFFFFFF" }
-        contentItem: Column {
+        contentItem: ColumnLayout {
+            spacing: 0
             Text {
-                width: parent.width; height: 34
+                Layout.fillWidth: true; Layout.preferredHeight: 34
                 text: Player.captionStatus === "loading" ? "Loading captions…"
                       : Player.captionStatus === "error" ? "Captions could not be loaded" : "Captions"
                 color: Player.captionStatus === "error" ? Theme.red : "#BDBDC4"
                 font.pixelSize: 12; verticalAlignment: Text.AlignVCenter; leftPadding: 10
             }
             Button {
-                width: parent.width; height: 42; text: "Captions off"; flat: true
-                palette.buttonText: "white"; onClicked: { Player.captionsEnabled = false; captionsPopup.close() }
+                Layout.fillWidth: true; Layout.preferredHeight: 42
+                text: (!Player.captionsEnabled ? "✓  " : "") + "Captions off"; flat: true
+                palette.buttonText: "white"; onClicked: { Player.selectCaption(-1); captionsPopup.close() }
             }
-            Repeater {
+            ListView {
+                id: captionList
+                Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                 model: Player.captions
                 delegate: Button {
                     required property var modelData
-                    width: parent.width; height: 42; flat: true
+                    width: captionList.width; height: 42; flat: true
                     text: (Player.captionsEnabled && Player.selectedCaptionIndex === index ? "✓  " : "") + (modelData.label || ("Captions " + (index + 1))); palette.buttonText: "white"
                     onClicked: { Player.selectCaption(index); captionsPopup.close() }
                 }
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+            }
+            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: "#30FFFFFF" }
+            Button {
+                Layout.fillWidth: true; Layout.preferredHeight: 44; text: "Caption appearance"; flat: true
+                palette.buttonText: "#E5E5E8"
+                onClicked: { captionsPopup.close(); captionAppearancePopup.open() }
+            }
+        }
+    }
+
+    Popup {
+        id: captionAppearancePopup
+        x: Math.max(18, root.width - width - 116); y: Math.max(18, root.height - bottomShade.height - height + 18)
+        width: 300; height: 354; modal: false; focus: true; padding: 16
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onClosed: root.revealControls()
+        background: Rectangle { color: "#F21A1A1E"; radius: 12; border.color: "#4AFFFFFF" }
+        contentItem: ColumnLayout {
+            spacing: 9
+            Text { text: "Caption appearance"; color: "white"; font.pixelSize: 17; font.bold: true }
+            Text { text: "Size"; color: "#BDBDC4"; font.pixelSize: 12 }
+            ComboBox {
+                readonly property var scales: [0.75, 1, 1.25, 1.5]
+                Layout.fillWidth: true; model: ["Small", "Medium", "Large", "Extra large"]
+                currentIndex: Math.max(0, scales.indexOf(Runtime.captionScale))
+                onActivated: Runtime.captionScale = scales[currentIndex]
+                Accessible.name: "Caption size"
+            }
+            Text { text: "Text color"; color: "#BDBDC4"; font.pixelSize: 12 }
+            ComboBox {
+                readonly property var colors: ["#FFFFFF", "#FFF176", "#80DEEA"]
+                Layout.fillWidth: true; model: ["White", "Yellow", "Cyan"]
+                currentIndex: Math.max(0, colors.indexOf(Runtime.captionColor))
+                onActivated: Runtime.captionColor = colors[currentIndex]
+                Accessible.name: "Caption text color"
+            }
+            Text { text: "Background"; color: "#BDBDC4"; font.pixelSize: 12 }
+            ComboBox {
+                readonly property var opacityValues: [0, 0.45, 0.72, 0.9]
+                Layout.fillWidth: true; model: ["None", "Light", "Dark", "Solid"]
+                currentIndex: Math.max(0, opacityValues.indexOf(Runtime.captionBackgroundOpacity))
+                onActivated: Runtime.captionBackgroundOpacity = opacityValues[currentIndex]
+                Accessible.name: "Caption background"
+            }
+            CheckBox {
+                Layout.fillWidth: true; text: "Text outline"; checked: Runtime.captionOutline
+                onToggled: Runtime.captionOutline = checked; palette.windowText: "white"
             }
         }
     }
@@ -419,7 +472,7 @@ Rectangle {
     Shortcut { sequence: "Up"; enabled: !root.uiLocked; onActivated: { Player.adjustVolume(0.05); root.revealControls() } }
     Shortcut { sequence: "Down"; enabled: !root.uiLocked; onActivated: { Player.adjustVolume(-0.05); root.revealControls() } }
     Shortcut { sequence: "M"; enabled: !root.uiLocked; onActivated: { Player.toggleMuted(); root.revealControls() } }
-    Shortcut { sequence: "C"; enabled: !root.uiLocked; onActivated: { Player.captionsEnabled = !Player.captionsEnabled; root.revealControls() } }
+    Shortcut { sequence: "C"; enabled: !root.uiLocked; onActivated: { Player.toggleCaptions(); root.revealControls() } }
     Shortcut { sequence: "N"; enabled: !root.uiLocked; onActivated: { Player.nextEpisode(); root.revealControls() } }
     Shortcut { sequence: "F"; enabled: !root.uiLocked; onActivated: root.toggleFullscreenRequested() }
     Shortcut { sequence: "Escape"; onActivated: root.escapeRequested() }

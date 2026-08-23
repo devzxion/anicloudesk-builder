@@ -4,6 +4,7 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QColor>
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
@@ -51,6 +52,15 @@ AppRuntime::~AppRuntime() { delete m_trayMenu; }
 QString AppRuntime::audioPreference() const { return m_settings.value(QStringLiteral("playback/audio"), QStringLiteral("sub")).toString(); }
 QString AppRuntime::playbackQuality() const { return m_settings.value(QStringLiteral("playback/quality"), QStringLiteral("auto")).toString(); }
 QString AppRuntime::serverPreference() const { return m_settings.value(QStringLiteral("playback/server"), QStringLiteral("hd-2")).toString(); }
+double AppRuntime::captionScale() const { return qBound(0.75, m_settings.value(QStringLiteral("captions/scale"), 1.0).toDouble(), 1.5); }
+QString AppRuntime::captionColor() const {
+  const QColor color(m_settings.value(QStringLiteral("captions/color"), QStringLiteral("#FFFFFF")).toString());
+  return color.isValid() ? color.name(QColor::HexRgb).toUpper() : QStringLiteral("#FFFFFF");
+}
+double AppRuntime::captionBackgroundOpacity() const {
+  return qBound(0.0, m_settings.value(QStringLiteral("captions/backgroundOpacity"), 0.72).toDouble(), 0.9);
+}
+bool AppRuntime::captionOutline() const { return m_settings.value(QStringLiteral("captions/outline"), true).toBool(); }
 int AppRuntime::downloadQuality() const { return m_settings.value(QStringLiteral("downloads/quality"), 1080).toInt(); }
 bool AppRuntime::allowMeteredDownloads() const { return m_settings.value(QStringLiteral("downloads/allowMetered"), false).toBool(); }
 bool AppRuntime::notificationsEnabled() const { return m_settings.value(QStringLiteral("notifications/enabled"), true).toBool(); }
@@ -69,6 +79,27 @@ void AppRuntime::setPlaybackQuality(const QString &value) { m_settings.setValue(
 void AppRuntime::setServerPreference(const QString &value) {
   m_settings.setValue(QStringLiteral("playback/server"), value == QStringLiteral("hd-1") ? QStringLiteral("hd-1") : QStringLiteral("hd-2"));
   emit preferencesChanged();
+}
+void AppRuntime::setCaptionScale(double value) {
+  const auto normalized = qBound(0.75, value, 1.5);
+  if (qFuzzyCompare(captionScale(), normalized)) return;
+  m_settings.setValue(QStringLiteral("captions/scale"), normalized); emit preferencesChanged();
+}
+void AppRuntime::setCaptionColor(const QString &value) {
+  const QColor color(value);
+  if (!color.isValid()) return;
+  const auto normalized = color.name(QColor::HexRgb).toUpper();
+  if (captionColor() == normalized) return;
+  m_settings.setValue(QStringLiteral("captions/color"), normalized); emit preferencesChanged();
+}
+void AppRuntime::setCaptionBackgroundOpacity(double value) {
+  const auto normalized = qBound(0.0, value, 0.9);
+  if (qFuzzyCompare(captionBackgroundOpacity(), normalized)) return;
+  m_settings.setValue(QStringLiteral("captions/backgroundOpacity"), normalized); emit preferencesChanged();
+}
+void AppRuntime::setCaptionOutline(bool value) {
+  if (captionOutline() == value) return;
+  m_settings.setValue(QStringLiteral("captions/outline"), value); emit preferencesChanged();
 }
 void AppRuntime::setDownloadQuality(int value) { m_settings.setValue(QStringLiteral("downloads/quality"), value); emit preferencesChanged(); }
 void AppRuntime::setAllowMeteredDownloads(bool value) { m_settings.setValue(QStringLiteral("downloads/allowMetered"), value); emit preferencesChanged(); }

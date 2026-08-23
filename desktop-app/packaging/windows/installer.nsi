@@ -1,9 +1,11 @@
 Unicode true
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
+!include "StrFunc.nsh"
+${StrLoc}
 
 !define PRODUCT_NAME "AniCloud"
-!define PRODUCT_VERSION "4.0.8"
+!define PRODUCT_VERSION "4.0.9"
 !define PRODUCT_ID "ink.anicloud.desktop"
 
 Name "${PRODUCT_NAME}"
@@ -21,6 +23,42 @@ SetCompressor /SOLID lzma
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
+
+Function EnsureAniCloudClosed
+ensure_anicloud_closed_retry:
+  ; In-app updates ask the running process to quit before this installer gets
+  ; here. Also handle manually launched installers while the tray process is
+  ; active, then verify that Windows actually released the executable.
+  Sleep 700
+  nsExec::ExecToStack '"$SYSDIR\tasklist.exe" /FI "IMAGENAME eq AniCloud.exe" /FO CSV /NH'
+  Pop $0
+  Pop $1
+  ${StrLoc} $2 $1 '"AniCloud.exe"' ">"
+  StrCmp $2 "" ensure_anicloud_closed_done
+
+  nsExec::ExecToStack '"$SYSDIR\taskkill.exe" /IM AniCloud.exe /T /F'
+  Pop $0
+  Pop $1
+  Sleep 1200
+  nsExec::ExecToStack '"$SYSDIR\tasklist.exe" /FI "IMAGENAME eq AniCloud.exe" /FO CSV /NH'
+  Pop $0
+  Pop $1
+  ${StrLoc} $2 $1 '"AniCloud.exe"' ">"
+  StrCmp $2 "" ensure_anicloud_closed_done
+
+  IfSilent ensure_anicloud_closed_abort
+  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION \
+    "AniCloud is still running in the background and could not be closed.$\r$\n$\r$\nClose AniCloud from Task Manager or its tray icon, then choose Retry." \
+    IDRETRY ensure_anicloud_closed_retry
+ensure_anicloud_closed_abort:
+  SetErrorLevel 5
+  Abort
+ensure_anicloud_closed_done:
+FunctionEnd
+
+Function .onInit
+  Call EnsureAniCloudClosed
+FunctionEnd
 
 Section "AniCloud" SEC_MAIN
   SetShellVarContext all
