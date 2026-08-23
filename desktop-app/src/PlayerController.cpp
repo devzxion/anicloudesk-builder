@@ -244,13 +244,33 @@ void PlayerController::setMuted(bool muted) { if (m_audio.isMuted() == muted) re
 void PlayerController::toggleMuted() { setMuted(!muted()); }
 
 void PlayerController::setCaptionsEnabled(bool enabled) {
-  if (m_captionsEnabled == enabled) return; m_captionsEnabled = enabled;
-  m_player.setActiveSubtitleTrack(enabled && !m_player.subtitleTracks().isEmpty() ? 0 : -1); emit captionsChanged();
+  const bool changed = m_captionsEnabled != enabled;
+  m_captionsEnabled = enabled;
+  if (!enabled) {
+    m_player.setActiveSubtitleTrack(-1);
+  } else if (!m_player.subtitleTracks().isEmpty()) {
+    const auto preferred = m_restoreCaptionIndex >= 0
+      ? qMin(m_restoreCaptionIndex, m_player.subtitleTracks().size() - 1)
+      : qMax(0, m_player.activeSubtitleTrack());
+    m_player.setActiveSubtitleTrack(preferred);
+    m_restoreCaptionIndex = -1;
+  }
+  if (changed) emit captionsChanged();
 }
 
 void PlayerController::selectCaption(int index) {
-  if (index >= 0 && index < m_player.subtitleTracks().size()) { m_captionsEnabled = true; m_player.setActiveSubtitleTrack(index); }
-  else { m_captionsEnabled = false; m_player.setActiveSubtitleTrack(-1); }
+  if (index >= 0 && index < m_captions.size()) {
+    m_captionsEnabled = true;
+    m_restoreCaptionIndex = index;
+    if (index < m_player.subtitleTracks().size()) {
+      m_player.setActiveSubtitleTrack(index);
+      m_restoreCaptionIndex = -1;
+    }
+  } else {
+    m_captionsEnabled = false;
+    m_restoreCaptionIndex = -1;
+    m_player.setActiveSubtitleTrack(-1);
+  }
   emit captionsChanged();
 }
 

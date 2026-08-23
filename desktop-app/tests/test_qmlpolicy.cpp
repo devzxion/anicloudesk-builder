@@ -20,6 +20,10 @@ private slots:
     QVERIFY(playerSource.contains("canSkipIntro"));
     QVERIFY(playerSource.contains("canSkipOutro"));
     QVERIFY(playerSource.contains("interval: 4000"));
+    QVERIFY(playerSource.contains("videoOutput.videoSink.subtitleText"));
+    QVERIFY(playerSource.contains("uiLocked"));
+    QVERIFY(playerSource.contains("onDoubleClicked: root.unlockPlayerUi()"));
+    QVERIFY(playerSource.contains("Double-click the lock to unlock"));
   }
 
   void shellBrandingAndNavigationMatchDesktopDesign() {
@@ -75,6 +79,14 @@ private slots:
     const auto source = installer.readAll();
     QVERIFY(!source.contains("WriteRegStr HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\Run\""));
     QVERIFY(source.contains("DeleteRegValue HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\Run\""));
+  }
+
+  void downloadsPersistTheResolvedEpisodeIdentity() {
+    QFile downloads(QStringLiteral(ANICLOUD_SOURCE_DIR "/src/DownloadManager.cpp")); QVERIFY(downloads.open(QIODevice::ReadOnly));
+    const auto source = downloads.readAll();
+    QVERIFY(source.contains("record.insert(QStringLiteral(\"episodeId\")"));
+    QVERIFY(source.contains("record.insert(QStringLiteral(\"audioMode\")"));
+    QVERIFY(source.contains("record.insert(QStringLiteral(\"server\")"));
   }
 
   void paletteIsCanonical() {

@@ -97,10 +97,11 @@ Flickable {
                             Text { visible: secondaryTitle.length > 0; text: secondaryTitle; color: Theme.muted; font.pixelSize: 12; elide: Text.ElideRight; Layout.fillWidth: true }
                         }
                         AppButton { text: "Play"; compact: true; onClicked: Player.open(Object.assign({}, modelData, { animeId: root.animeId, animeName: Provider.details.title, animeImage: Provider.details.poster, audioMode: Runtime.audioPreference })) }
-                        AppButton { text: "Download"; compact: true; secondary: true; enabled: Account.authenticated; onClicked: Downloads.enqueueEpisode(Object.assign({}, modelData, { animeId: root.animeId, animeName: Provider.details.title, animeImage: Provider.details.poster, audioMode: Runtime.audioPreference }), Runtime.downloadQuality) }
+                        AppButton { text: Downloads.preparing ? "Preparing…" : "Download"; compact: true; secondary: true; enabled: Account.authenticated && !Downloads.preparing; onClicked: Downloads.enqueueEpisode(Object.assign({}, modelData, { animeId: root.animeId, animeName: Provider.details.title, animeImage: Provider.details.poster, audioMode: Runtime.audioPreference }), Runtime.downloadQuality) }
                     }
                 }
             }
+            Text { visible: Downloads.error.length > 0; text: Downloads.error; color: Theme.red; wrapMode: Text.WordWrap; Layout.fillWidth: true }
             Text {
                 visible: root.matchingEpisodes.length > 0
                 text: "Showing " + Math.min(root.episodeLimit, root.matchingEpisodes.length) + " of " + root.matchingEpisodes.length
@@ -119,7 +120,7 @@ Flickable {
             PosterRail { title: "You may also like"; model: Provider.recommendations; Layout.fillWidth: true; onActivated: anime => Runtime.route = "details/" + anime.id }
         }
     }
-    LoadingSkeleton { anchors.centerIn: parent; width: Math.min(760, parent.width - 64); rows: 4; visible: Provider.loading && !Provider.details.title }
+    LoadingSkeleton { anchors.centerIn: parent; width: Math.min(760, parent.width - 64); rows: 4; active: Provider.loading && !Provider.details.title; z: 5 }
     EmptyState { anchors.centerIn: parent; visible: !Provider.loading && !Provider.details.title && Provider.error.length > 0; title: "Details unavailable"; message: Provider.error; symbol: "!" }
     Timer { id: shareNoticeTimer; interval: 2800; onTriggered: root.shareNotice = "" }
     Connections {

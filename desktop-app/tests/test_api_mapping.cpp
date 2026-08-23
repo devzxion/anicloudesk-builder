@@ -134,6 +134,16 @@ private slots:
       "<td class=\"episode-title\"><a href=\"/anime/1/Show/episode/7\">Finale</a></td></tr>");
     QCOMPARE(ProviderClient::parseEpisodeCountHtml(html), 7);
   }
+
+  void discoversCanonicalSluggedEpisodeListing() {
+    const auto html = QStringLiteral(
+      "<a href=\"https://attacker.example/anime/21/Fake/episode\">Untrusted</a>"
+      "<a href=\"https://myanimelist.net/anime/21/One_Piece/episode\">Episodes</a>"
+      "<a href=\"/anime/210/Other_Show/episode\">Wrong anime</a>");
+    QCOMPARE(ProviderClient::parseEpisodeListingUrlHtml(html, QStringLiteral("21")),
+             QStringLiteral("https://myanimelist.net/anime/21/One_Piece/episode"));
+    QVERIFY(ProviderClient::parseEpisodeListingUrlHtml(html, QStringLiteral("20")).isEmpty());
+  }
 };
 
 QTEST_GUILESS_MAIN(ApiMappingTest)

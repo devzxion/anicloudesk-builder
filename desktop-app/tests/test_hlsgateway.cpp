@@ -5,6 +5,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QRegularExpression>
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -98,6 +99,36 @@ private slots:
     QVERIFY(manifest.body.contains("SUBTITLES=\"anicloud-subs\""));
     QVERIFY(manifest.body.contains(".vtt\""));
     QVERIFY(!manifest.body.contains(QByteArray::number(m_upstream.serverPort())));
+  }
+
+  void wrapsDirectMediaPlaylistsSoExternalCaptionsRemainSelectable() {
+    HlsGateway gateway;
+    const auto local = gateway.openSession({
+      {QStringLiteral("mediaUrl"), upstreamUrl(QStringLiteral("/master.m3u8")).toString()},
+      {QStringLiteral("subtitles"), QVariantList{QVariantMap{
+        {QStringLiteral("label"), QStringLiteral("English")},
+        {QStringLiteral("url"), upstreamUrl(QStringLiteral("/en.vtt")).toString()},
+      }}},
+    });
+    const auto master = request(QUrl(local));
+    QCOMPARE(master.status, 200);
+    QVERIFY(master.body.contains("#EXT-X-MEDIA:TYPE=SUBTITLES"));
+    QVERIFY(master.body.contains("#EXT-X-STREAM-INF"));
+
+    const auto lines = master.body.split('\n');
+    const QUrl mediaUrl(QString::fromUtf8(lines.last().trimmed()));
+    QVERIFY(mediaUrl.isValid());
+    QVERIFY(mediaUrl != QUrl(local));
+    const auto media = request(mediaUrl);
+    QCOMPARE(media.status, 200);
+    QVERIFY(media.body.contains("#EXTINF"));
+
+    const QRegularExpression captionExpression(QStringLiteral("URI=\\\"([^\\\"]+)\\\""));
+    const auto captionMatch = captionExpression.match(QString::fromUtf8(master.body));
+    QVERIFY(captionMatch.hasMatch());
+    const auto captions = request(QUrl(captionMatch.captured(1)));
+    QCOMPARE(captions.status, 200);
+    QVERIFY(captions.body.startsWith("WEBVTT"));
   }
 
   void assignsTransportStreamSuffixToDisguisedSegments() {

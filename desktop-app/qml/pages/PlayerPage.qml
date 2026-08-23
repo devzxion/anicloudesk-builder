@@ -10,8 +10,10 @@ Rectangle {
     focus: true
     property bool controlsVisible: true
     property bool scrubbing: false
+    property bool uiLocked: false
+    property bool lockButtonVisible: false
     readonly property bool compact: width < 920
-    readonly property bool controlsLocked: scrubbing || captionsPopup.opened || settingsPopup.opened || !Player.playing
+    readonly property bool controlsPinned: scrubbing || captionsPopup.opened || settingsPopup.opened || !Player.playing
     readonly property bool initialBuffering: (Player.state === "loading" || Player.state === "resolving" || Player.state === "buffering") && Player.position < 500
     readonly property bool canSkipIntro: Player.introEnd > Player.introStart && Player.position >= Player.introStart && Player.position < Player.introEnd
     readonly property bool canSkipOutro: Player.outroEnd > Player.outroStart && Player.position >= Player.outroStart && Player.position < Player.outroEnd
@@ -19,8 +21,30 @@ Rectangle {
     signal escapeRequested()
 
     function revealControls() {
+        if (uiLocked) {
+            revealLockButton()
+            return
+        }
         controlsVisible = true
         if (Player.playing) hideTimer.restart()
+    }
+    function revealLockButton() {
+        if (!uiLocked) return
+        lockButtonVisible = true
+        lockButtonTimer.restart()
+    }
+    function lockPlayerUi() {
+        uiLocked = true
+        controlsVisible = false
+        captionsPopup.close()
+        settingsPopup.close()
+        revealLockButton()
+    }
+    function unlockPlayerUi() {
+        uiLocked = false
+        lockButtonVisible = false
+        lockHelpPopup.close()
+        revealControls()
     }
     function time(ms) {
         const total = Math.max(0, Math.floor(ms / 1000))
@@ -40,26 +64,45 @@ Rectangle {
     MouseArea {
         anchors.fill: parent
         hoverEnabled: true
-        cursorShape: root.controlsVisible ? Qt.ArrowCursor : Qt.BlankCursor
-        onPositionChanged: root.revealControls()
+        cursorShape: root.uiLocked ? (root.lockButtonVisible ? Qt.ArrowCursor : Qt.BlankCursor)
+                                   : root.controlsVisible ? Qt.ArrowCursor : Qt.BlankCursor
+        onPositionChanged: root.uiLocked ? root.revealLockButton() : root.revealControls()
         onClicked: {
+            if (root.uiLocked) {
+                root.revealLockButton()
+                return
+            }
             root.revealControls()
             if (!root.initialBuffering && Player.state !== "error") Player.togglePlayback()
         }
-        onDoubleClicked: root.toggleFullscreenRequested()
+        onDoubleClicked: if (!root.uiLocked) root.toggleFullscreenRequested()
     }
 
     Timer {
         id: hideTimer
         interval: 4000
         repeat: false
-        onTriggered: if (!root.controlsLocked) root.controlsVisible = false
+        onTriggered: if (!root.controlsPinned && !root.uiLocked) root.controlsVisible = false
+    }
+
+    Timer {
+        id: lockButtonTimer
+        interval: 2600
+        repeat: false
+        onTriggered: root.lockButtonVisible = false
+    }
+
+    Timer {
+        id: lockHintTimer
+        interval: 2800
+        repeat: false
+        onTriggered: lockHelpPopup.close()
     }
 
     Rectangle {
         id: topShade
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-        height: 132; opacity: root.controlsVisible ? 1 : 0; visible: opacity > 0; z: 3
+        height: 132; opacity: root.controlsVisible && !root.uiLocked ? 1 : 0; visible: opacity > 0; z: 3
         Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
         gradient: Gradient {
             GradientStop { position: 0; color: "#D9000000" }
@@ -91,7 +134,7 @@ Rectangle {
 
     Row {
         anchors.centerIn: parent; spacing: 24; z: 4
-        opacity: root.controlsVisible && !root.initialBuffering && Player.state !== "error" ? 1 : 0
+        opacity: root.controlsVisible && !root.uiLocked && !root.initialBuffering && Player.state !== "error" ? 1 : 0
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 140 } }
         PlayerIconButton { iconName: "back10"; tooltip: "Back 10 seconds (Left)"; iconSize: 29; onClicked: { Player.seekBy(-10000); root.revealControls() } }
@@ -105,7 +148,7 @@ Rectangle {
     Row {
         anchors.right: parent.right; anchors.bottom: bottomShade.top
         anchors.rightMargin: 34; anchors.bottomMargin: 10; spacing: 10; z: 5
-        visible: root.canSkipIntro || root.canSkipOutro
+        visible: !root.uiLocked && (root.canSkipIntro || root.canSkipOutro)
         AppButton {
             visible: root.canSkipIntro
             text: "Skip intro"; compact: true; onClicked: Player.skipIntro()
@@ -119,7 +162,7 @@ Rectangle {
     Rectangle {
         id: bottomShade
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-        height: 178; opacity: root.controlsVisible ? 1 : 0; visible: opacity > 0; z: 4
+        height: 178; opacity: root.controlsVisible && !root.uiLocked ? 1 : 0; visible: opacity > 0; z: 4
         Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
         gradient: Gradient {
             GradientStop { position: 0; color: "#00000000" }
@@ -217,8 +260,54 @@ Rectangle {
                     onClicked: Player.switchServer(Player.current.server === "hd-2" ? "hd-1" : "hd-2")
                 }
                 PlayerIconButton { iconName: "settings"; tooltip: "Playback settings"; onClicked: { root.revealControls(); settingsPopup.open() } }
+                PlayerIconButton { iconName: "lock"; tooltip: "Lock player controls"; onClicked: root.lockPlayerUi() }
                 PlayerIconButton { iconName: "fullscreen"; tooltip: "Fullscreen (F)"; onClicked: root.toggleFullscreenRequested() }
             }
+        }
+    }
+
+    Rectangle {
+        id: subtitleBackdrop
+        readonly property string cue: String(videoOutput.videoSink.subtitleText || "").trim()
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: !root.uiLocked && root.controlsVisible ? 150 : 42
+        width: Math.min(parent.width - 80, 900)
+        height: subtitleText.implicitHeight + 18
+        radius: 6; color: "#B8000000"; z: 5
+        visible: Player.captionsEnabled && cue.length > 0
+        Text {
+            id: subtitleText
+            anchors.fill: parent; anchors.margins: 9
+            text: subtitleBackdrop.cue; textFormat: Text.PlainText
+            color: "white"; font.pixelSize: root.compact ? 18 : 22; font.weight: Font.DemiBold
+            style: Text.Outline; styleColor: "black"
+            wrapMode: Text.WordWrap; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter
+        }
+    }
+
+    Rectangle {
+        id: lockedControl
+        anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; anchors.leftMargin: 28
+        width: 58; height: 58; radius: 29; color: "#85000000"; border.color: "#66FFFFFF"; z: 12
+        opacity: root.uiLocked && root.lockButtonVisible ? 0.78 : 0
+        visible: opacity > 0
+        Accessible.role: Accessible.Button
+        Accessible.name: "Locked player controls. Double-click to unlock."
+        Behavior on opacity { NumberAnimation { duration: 180 } }
+        Image {
+            anchors.centerIn: parent; width: 25; height: 25
+            source: Qt.resolvedUrl("../../resources/icons/player-lock.svg")
+            sourceSize.width: 25; sourceSize.height: 25
+        }
+        MouseArea {
+            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                root.revealLockButton()
+                lockHelpPopup.open()
+                lockHintTimer.restart()
+            }
+            onDoubleClicked: root.unlockPlayerUi()
         }
     }
 
@@ -302,19 +391,41 @@ Rectangle {
         }
     }
 
-    Shortcut { sequence: "Space"; onActivated: { Player.togglePlayback(); root.revealControls() } }
-    Shortcut { sequence: "Left"; onActivated: { Player.seekBy(-10000); root.revealControls() } }
-    Shortcut { sequence: "Right"; onActivated: { Player.seekBy(10000); root.revealControls() } }
-    Shortcut { sequence: "Up"; onActivated: { Player.adjustVolume(0.05); root.revealControls() } }
-    Shortcut { sequence: "Down"; onActivated: { Player.adjustVolume(-0.05); root.revealControls() } }
-    Shortcut { sequence: "M"; onActivated: { Player.toggleMuted(); root.revealControls() } }
-    Shortcut { sequence: "C"; onActivated: { Player.captionsEnabled = !Player.captionsEnabled; root.revealControls() } }
-    Shortcut { sequence: "N"; onActivated: { Player.nextEpisode(); root.revealControls() } }
-    Shortcut { sequence: "F"; onActivated: root.toggleFullscreenRequested() }
+    Popup {
+        id: lockHelpPopup
+        x: Math.max(20, (root.width - width) / 2)
+        y: Math.max(20, root.height * 0.16)
+        width: 360; height: 78; modal: false; focus: false; padding: 14; z: 20
+        closePolicy: Popup.CloseOnEscape
+        background: Rectangle { color: "#ED1A1A1E"; radius: 12; border.color: "#66FFFFFF" }
+        contentItem: RowLayout {
+            spacing: 12
+            Image { source: Qt.resolvedUrl("../../resources/icons/player-lock.svg"); Layout.preferredWidth: 24; Layout.preferredHeight: 24 }
+            Text { Layout.fillWidth: true; text: "Player controls are locked. Double-click the lock to unlock."; color: "white"; wrapMode: Text.WordWrap; font.pixelSize: 13 }
+        }
+    }
+
+    Shortcut { sequence: "Space"; enabled: !root.uiLocked; onActivated: { Player.togglePlayback(); root.revealControls() } }
+    Shortcut { sequence: "Left"; enabled: !root.uiLocked; onActivated: { Player.seekBy(-10000); root.revealControls() } }
+    Shortcut { sequence: "Right"; enabled: !root.uiLocked; onActivated: { Player.seekBy(10000); root.revealControls() } }
+    Shortcut { sequence: "Up"; enabled: !root.uiLocked; onActivated: { Player.adjustVolume(0.05); root.revealControls() } }
+    Shortcut { sequence: "Down"; enabled: !root.uiLocked; onActivated: { Player.adjustVolume(-0.05); root.revealControls() } }
+    Shortcut { sequence: "M"; enabled: !root.uiLocked; onActivated: { Player.toggleMuted(); root.revealControls() } }
+    Shortcut { sequence: "C"; enabled: !root.uiLocked; onActivated: { Player.captionsEnabled = !Player.captionsEnabled; root.revealControls() } }
+    Shortcut { sequence: "N"; enabled: !root.uiLocked; onActivated: { Player.nextEpisode(); root.revealControls() } }
+    Shortcut { sequence: "F"; enabled: !root.uiLocked; onActivated: root.toggleFullscreenRequested() }
     Shortcut { sequence: "Escape"; onActivated: root.escapeRequested() }
 
     Connections {
         target: Player
-        function onStateChanged() { root.revealControls() }
+        function onStateChanged() {
+            if (Player.state === "idle") {
+                root.uiLocked = false
+                root.lockButtonVisible = false
+                lockHelpPopup.close()
+            } else {
+                root.revealControls()
+            }
+        }
     }
 }

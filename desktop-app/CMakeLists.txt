@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(AniCloudDesktop VERSION 4.0.6 LANGUAGES CXX)
+project(AniCloudDesktop VERSION 4.0.7 LANGUAGES CXX)
 
 if(WIN32)
   enable_language(RC)
@@ -131,6 +131,7 @@ qt_add_qml_module(AniCloud
     resources/icons/player-fullscreen.svg
     resources/icons/player-next.svg
     resources/icons/player-back.svg
+    resources/icons/player-lock.svg
 )
 
 target_include_directories(AniCloud PRIVATE

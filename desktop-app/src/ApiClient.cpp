@@ -225,17 +225,21 @@ void ProviderClient::getText(const QUrl &url,
                              const QList<QPair<QByteArray, QByteArray>> &headers,
                              TextSuccess success,
                              std::function<void(const QString &)> failure,
-                             bool reportError) {
+                             bool reportError,
+                             bool trackLoading) {
   QNetworkRequest request(url);
   request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                        QNetworkRequest::NoLessSafeRedirectPolicy);
   request.setTransferTimeout(75'000);
   for (const auto &[name, value] : headers) request.setRawHeader(name, value);
   const bool wasLoading = loading();
-  ++m_pending;
-  if (!wasLoading) emit loadingChanged();
+  if (trackLoading) {
+    ++m_pending;
+    if (!wasLoading) emit loadingChanged();
+  }
   auto *reply = m_network.get(request);
-  connect(reply, &QNetworkReply::finished, this, [this, reply, reportError, success = std::move(success), failure = std::move(failure)] {
+  connect(reply, &QNetworkReply::finished, this, [this, reply, reportError, trackLoading,
+                                                  success = std::move(success), failure = std::move(failure)] {
     const auto body = reply->readAll();
     const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const bool ok = reply->error() == QNetworkReply::NoError && status >= 200 && status < 300 && !body.isEmpty();
@@ -250,8 +254,10 @@ void ProviderClient::getText(const QUrl &url,
       if (failure) failure(message);
     }
     reply->deleteLater();
-    --m_pending;
-    if (m_pending == 0) emit loadingChanged();
+    if (trackLoading) {
+      --m_pending;
+      if (m_pending == 0) emit loadingChanged();
+    }
   });
 }
 
@@ -386,6 +392,25 @@ int ProviderClient::parseEpisodeCountHtml(const QString &html, int fallback) {
   while (rawNumbers.hasNext()) maximum = qMax(maximum, rawNumbers.next().captured(1).toInt());
 
   return qBound(0, maximum, 3000);
+}
+
+QString ProviderClient::parseEpisodeListingUrlHtml(const QString &html, const QString &animeId) {
+  const auto escapedId = QRegularExpression::escape(animeId);
+  const QRegularExpression pathExpression(
+    QStringLiteral("^/anime/%1/[^/]+/episode/?$").arg(escapedId),
+    QRegularExpression::CaseInsensitiveOption);
+  auto anchors = rx(QStringLiteral("<a\\b[^>]*href\\s*=\\s*[\\\"']([^\\\"']+)[\\\"'][^>]*>"))
+                 .globalMatch(html);
+  while (anchors.hasNext()) {
+    auto candidate = QUrl(MalBaseUrl).resolved(QUrl(htmlText(anchors.next().captured(1))));
+    if (candidate.scheme() != QStringLiteral("https") ||
+        candidate.host().compare(QStringLiteral("myanimelist.net"), Qt::CaseInsensitive) != 0) continue;
+    if (!pathExpression.match(candidate.path()).hasMatch()) continue;
+    candidate.setQuery(QString{});
+    candidate.setFragment(QString{});
+    return candidate.toString(QUrl::FullyEncoded);
+  }
+  return {};
 }
 
 QVariantMap ProviderClient::parseAnimeDetailsHtml(const QString &html, const QString &animeId,
@@ -561,15 +586,19 @@ void ProviderClient::loadDetails(const QString &animeId) {
   const auto url = providerUrl(MalBaseUrl, QStringLiteral("/anime/%1").arg(
     QString::fromUtf8(QUrl::toPercentEncoding(animeId))));
   getText(url, malHeaders(), [this, animeId](const QByteArray &body, const QUrl &finalUrl) {
-    m_details = parseAnimeDetailsHtml(QString::fromUtf8(body), animeId, &m_recommendations);
+    const auto detailHtml = QString::fromUtf8(body);
+    m_details = parseAnimeDetailsHtml(detailHtml, animeId, &m_recommendations);
     const auto episodeCount = qMax(0, m_details.value(QStringLiteral("episodes")).toInt());
     if (episodeCount > 0) applyEpisodes(animeId, episodeCount);
     emit detailsChanged();
-    auto episodeUrl = finalUrl;
-    auto path = episodeUrl.path();
-    while (path.endsWith(QLatin1Char('/'))) path.chop(1);
-    episodeUrl.setPath(path + QStringLiteral("/episode"));
-    episodeUrl.setQuery(QString{});
+    auto episodeUrl = QUrl(parseEpisodeListingUrlHtml(detailHtml, animeId));
+    if (!episodeUrl.isValid() || episodeUrl.isEmpty()) {
+      episodeUrl = finalUrl;
+      auto path = episodeUrl.path();
+      while (path.endsWith(QLatin1Char('/'))) path.chop(1);
+      episodeUrl.setPath(path + QStringLiteral("/episode"));
+      episodeUrl.setQuery(QString{});
+    }
     loadEpisodeTitlesPage(animeId, episodeUrl, 0, episodeCount);
   });
 }
@@ -636,7 +665,7 @@ void ProviderClient::loadEpisodeTitlesPage(const QString &animeId, const QUrl &e
     m_details.insert(QStringLiteral("episodes"), fallbackCount);
     m_details.insert(QStringLiteral("subEpisodes"), fallbackCount);
     emit detailsChanged();
-  }, false);
+  }, false, offset == 0);
 }
 
 void ProviderClient::loadEpisodes(const QString &animeId, int offset, int limit) {

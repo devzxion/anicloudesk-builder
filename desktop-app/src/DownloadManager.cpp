@@ -84,15 +84,17 @@ DownloadManager::DownloadManager(Database *database, AccountClient *account, Pro
     if (!m_pendingEpisodes.contains(generation)) return;
     const auto episode = m_pendingEpisodes.take(generation);
     enqueue(episode, stream, episode.value(QStringLiteral("preferredHeight"), 1080).toInt());
+    emit preparingChanged();
   });
   connect(m_provider, &ProviderClient::streamFailed, this, [this](int generation, const QString &message) {
-    if (m_pendingEpisodes.remove(generation) > 0) setError(message);
+    if (m_pendingEpisodes.remove(generation) > 0) { setError(message); emit preparingChanged(); }
   });
   connect(m_account, &AccountClient::authenticationChanged, this, [this] {
     if (!m_account->authenticated()) {
       const auto ids = m_jobs.keys();
       for (const auto &id : ids) pause(id);
       m_pendingEpisodes.clear();
+      emit preparingChanged();
     }
     reload();
   });
@@ -152,8 +154,12 @@ QString DownloadManager::enqueue(const QVariantMap &episode, const QVariantMap &
   if (!stream.value(QStringLiteral("referer")).toString().isEmpty()) job->headers.insert(QStringLiteral("Referer"), stream.value(QStringLiteral("referer")));
   job->preferredHeight = qBound(144, preferredHeight, 4320);
   job->record = episode;
+  job->record.insert(QStringLiteral("episodeId"),
+                     episode.value(QStringLiteral("episodeId"), episode.value(QStringLiteral("id"))));
   if (!job->record.contains(QStringLiteral("episodeNumber"))) job->record.insert(QStringLiteral("episodeNumber"), episode.value(QStringLiteral("number")));
   if (!job->record.contains(QStringLiteral("episodeName"))) job->record.insert(QStringLiteral("episodeName"), episode.value(QStringLiteral("title"), QStringLiteral("Episode %1").arg(episode.value(QStringLiteral("number")).toInt())));
+  job->record.insert(QStringLiteral("audioMode"), stream.value(QStringLiteral("audioMode"), episode.value(QStringLiteral("audioMode"), QStringLiteral("sub"))));
+  job->record.insert(QStringLiteral("server"), stream.value(QStringLiteral("server"), episode.value(QStringLiteral("server"), QStringLiteral("hd-1"))));
   job->record.insert(QStringLiteral("id"), job->id);
   job->record.insert(QStringLiteral("ownerId"), m_account->user().value(QStringLiteral("id")).toString());
   job->record.insert(QStringLiteral("mediaUrl"), media.toString(QUrl::FullyEncoded));
@@ -182,6 +188,7 @@ void DownloadManager::enqueueEpisode(const QVariantMap &episode, int preferredHe
   pending.insert(QStringLiteral("preferredHeight"), preferredHeight);
   const int generation = ++m_resolveGeneration;
   m_pendingEpisodes.insert(generation, pending);
+  emit preparingChanged();
   m_provider->resolveStream(generation,
     episode.value(QStringLiteral("episodeId"), episode.value(QStringLiteral("id"))).toString(),
     episode.value(QStringLiteral("server"), QStringLiteral("hd-1")).toString(),

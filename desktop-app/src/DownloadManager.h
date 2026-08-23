@@ -18,6 +18,7 @@ class DownloadManager final : public QObject {
   Q_PROPERTY(QString error READ error NOTIFY errorChanged)
   Q_PROPERTY(QString storageRoot READ storageRoot NOTIFY storageRootChanged)
   Q_PROPERTY(bool movingStorage READ movingStorage NOTIFY movingStorageChanged)
+  Q_PROPERTY(bool preparing READ preparing NOTIFY preparingChanged)
 
 public:
   DownloadManager(Database *database, AccountClient *account, ProviderClient *provider, QObject *parent = nullptr);
@@ -27,6 +28,7 @@ public:
   [[nodiscard]] QString error() const { return m_error; }
   [[nodiscard]] QString storageRoot() const { return m_storageRoot; }
   [[nodiscard]] bool movingStorage() const { return m_movingStorage; }
+  [[nodiscard]] bool preparing() const { return !m_pendingEpisodes.isEmpty(); }
 
   Q_INVOKABLE void reload();
   Q_INVOKABLE QString enqueue(const QVariantMap &episode, const QVariantMap &stream, int preferredHeight = 1080);
@@ -43,6 +45,7 @@ signals:
   void errorChanged();
   void storageRootChanged();
   void movingStorageChanged();
+  void preparingChanged();
   void downloadCompleted(const QString &id);
 
 private:

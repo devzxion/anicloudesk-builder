@@ -16,6 +16,11 @@ Item {
             RowLayout { anchors.fill: parent; anchors.margins: 16; Text { text: "Sign in to download episodes for offline playback."; color: Theme.text; Layout.fillWidth: true } AppButton { text: "Sign in"; onClicked: Runtime.route = "auth" } }
         }
         Text { visible: Downloads.error.length > 0; text: Downloads.error; color: Theme.red; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+        RowLayout {
+            visible: Downloads.preparing; Layout.fillWidth: true; spacing: 10
+            BusyIndicator { running: parent.visible; implicitWidth: 26; implicitHeight: 26; palette.accent: Theme.red }
+            Text { text: "Resolving the stream and preparing the offline library…"; color: Theme.muted; font.pixelSize: 12 }
+        }
         ListView {
             id: list; Layout.fillWidth: true; Layout.fillHeight: true; spacing: 10; clip: true; model: Downloads.items
             ScrollBar.vertical: ScrollBar {}
@@ -37,6 +42,6 @@ Item {
                 }
             }
         }
-        EmptyState { visible: Account.authenticated && list.count === 0; title: "No downloads yet"; message: "Choose an episode from its details page to add it to your managed offline library."; Layout.fillWidth: true; Layout.fillHeight: true }
+        EmptyState { visible: Account.authenticated && !Downloads.preparing && list.count === 0; title: "No downloads yet"; message: "Choose an episode from its details page to add it to your managed offline library."; Layout.fillWidth: true; Layout.fillHeight: true }
     }
 }

@@ -59,6 +59,6 @@ Flickable {
         }
     }
 
-    LoadingSkeleton { anchors.centerIn: parent; width: Math.min(760, parent.width - 64); rows: 4; visible: Provider.loading && Provider.popular.length === 0 }
+    LoadingSkeleton { anchors.centerIn: parent; width: Math.min(760, parent.width - 64); rows: 4; active: Provider.loading && Provider.popular.length === 0; z: 5 }
     EmptyState { anchors.centerIn: parent; visible: !Provider.loading && root.hero.length === 0 && Provider.error.length > 0; title: "Home is unavailable"; message: Provider.error; symbol: "!" }
 }

@@ -57,6 +57,11 @@ Item {
         EmptyState { visible: !Provider.loading && grid.count === 0; title: "No anime found"; message: "Try another title or spelling."; Layout.fillWidth: true; Layout.fillHeight: true }
     }
 
+    LoadingSkeleton {
+        anchors.centerIn: parent; width: Math.min(720, parent.width - 64); rows: 4; z: 5
+        active: Provider.loading && grid.count === 0
+    }
+
     function submitSearch() {
         const query = searchField.text.trim()
         if (!query.length) return

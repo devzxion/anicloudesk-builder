@@ -50,6 +50,7 @@ Item {
                 }
             }
         }
-        EmptyState { visible: list.count === 0; title: root.tabNames[root.tab] + " is empty"; message: !Account.authenticated && root.tab !== 1 ? "Sign in to sync this part of your library." : "Titles will appear here as you use AniCloud."; Layout.fillWidth: true; Layout.fillHeight: true }
+        EmptyState { visible: !Account.busy && list.count === 0; title: root.tabNames[root.tab] + " is empty"; message: !Account.authenticated && root.tab !== 1 ? "Sign in to sync this part of your library." : "Titles will appear here as you use AniCloud."; Layout.fillWidth: true; Layout.fillHeight: true }
     }
+    LoadingSkeleton { anchors.centerIn: parent; width: Math.min(720, parent.width - 64); rows: 4; active: Account.busy && list.count === 0; z: 5 }
 }

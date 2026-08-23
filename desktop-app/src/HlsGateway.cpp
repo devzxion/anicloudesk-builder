@@ -112,16 +112,17 @@ QUrl HlsGateway::localUrl(const QString &token, const QUrl &upstream, const QStr
   auto it = m_sessions.find(token);
   if (it == m_sessions.end()) return {};
   const auto normalized = upstream.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment).toString(QUrl::FullyEncoded);
-  auto id = it->identifiers.value(normalized);
+  const auto identifier = normalized + QLatin1Char('|') + resourceKind.toLower();
+  auto id = it->identifiers.value(identifier);
   if (id.isEmpty()) {
-    const auto baseId = QString::fromLatin1(QCryptographicHash::hash(normalized.toUtf8(), QCryptographicHash::Sha256).toHex().left(24));
+    const auto baseId = QString::fromLatin1(QCryptographicHash::hash(identifier.toUtf8(), QCryptographicHash::Sha256).toHex().left(24));
     const auto suffix = localResourceSuffix(upstream, resourceKind);
     id = baseId + suffix;
     int collision = 0;
     while (it->resources.contains(id) && it->resources.value(id) != upstream)
       id = baseId + QStringLiteral("-%1").arg(++collision) + suffix;
     it->resources.insert(id, upstream);
-    it->identifiers.insert(normalized, id);
+    it->identifiers.insert(identifier, id);
   }
   return QUrl(QStringLiteral("http://127.0.0.1:%1/s/%2/%3").arg(m_server.serverPort()).arg(token, id));
 }
@@ -224,10 +225,17 @@ void HlsGateway::proxyResolved(QTcpSocket *socket, const QByteArray &method, con
           const QUrl url(track.value(QStringLiteral("url"), track.value(QStringLiteral("file"))).toString());
           if (url.isValid()) captions.append({track.value(QStringLiteral("label"), QStringLiteral("Captions")).toString(), localUrl(token, url, QStringLiteral("subtitle"))});
         }
-        body = HlsTools::addSubtitleTracks(body, captions);
+        if (body.contains("#EXT-X-STREAM-INF")) {
+          body = HlsTools::addSubtitleTracks(body, captions);
+        } else {
+          const auto mediaUrl = localUrl(token, finalUrl, QStringLiteral("media"));
+          body = HlsTools::makeOfflineMaster(mediaUrl, captions);
+        }
       }
       contentType = QByteArrayLiteral("application/vnd.apple.mpegurl");
     }
+    if (resourceId.endsWith(QStringLiteral(".vtt"), Qt::CaseInsensitive))
+      contentType = QByteArrayLiteral("text/vtt; charset=utf-8");
     QByteArray response = QByteArrayLiteral("HTTP/1.1 ") + QByteArray::number(status) + QByteArrayLiteral(" ") + reasonFor(status) + QByteArrayLiteral("\r\n");
     response += QByteArrayLiteral("Connection: close\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\n");
     if (!contentType.isEmpty()) response += QByteArrayLiteral("Content-Type: ") + contentType + QByteArrayLiteral("\r\n");
