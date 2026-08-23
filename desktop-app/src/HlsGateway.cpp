@@ -112,7 +112,11 @@ QUrl HlsGateway::localUrl(const QString &token, const QUrl &upstream, const QStr
   auto it = m_sessions.find(token);
   if (it == m_sessions.end()) return {};
   const auto normalized = upstream.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment).toString(QUrl::FullyEncoded);
-  const auto identifier = normalized + QLatin1Char('|') + resourceKind.toLower();
+  // A direct media playlist needs a second opaque URL so the root URL can serve
+  // a synthetic master. Other resources retain URL-based deduplication so the
+  // kind discovered while parsing (for example a disguised .ts segment) wins.
+  const auto identifier = normalized + (resourceKind.compare(QStringLiteral("media"), Qt::CaseInsensitive) == 0
+    ? QStringLiteral("|media") : QString{});
   auto id = it->identifiers.value(identifier);
   if (id.isEmpty()) {
     const auto baseId = QString::fromLatin1(QCryptographicHash::hash(identifier.toUtf8(), QCryptographicHash::Sha256).toHex().left(24));
