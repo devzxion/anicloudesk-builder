@@ -5,7 +5,7 @@ Unicode true
 ${StrLoc}
 
 !define PRODUCT_NAME "AniCloud"
-!define PRODUCT_VERSION "4.1.1"
+!define PRODUCT_VERSION "4.1.2"
 !define PRODUCT_ID "ink.anicloud.desktop"
 
 Name "${PRODUCT_NAME}"
@@ -84,9 +84,8 @@ legacy_removed:
   WriteRegStr HKCR "anicloud" "" "URL:AniCloud Protocol"
   WriteRegStr HKCR "anicloud" "URL Protocol" ""
   WriteRegStr HKCR "anicloud\shell\open\command" "" '"$INSTDIR\AniCloud.exe" "%1"'
-  ; Startup is privacy- and security-sensitive. Clear the legacy automatic
-  ; registration; users can explicitly opt in from Profile after installation.
-  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AniCloud"
+  ; Preserve the user's startup choice across updates. AniCloud repairs the
+  ; registration from its persisted Profile setting whenever it launches.
   CreateDirectory "$SMPROGRAMS\AniCloud"
   CreateShortcut "$SMPROGRAMS\AniCloud\AniCloud.lnk" "$INSTDIR\AniCloud.exe" "" "$INSTDIR\AniCloud.exe"
   CreateShortcut "$DESKTOP\AniCloud.lnk" "$INSTDIR\AniCloud.exe" "" "$INSTDIR\AniCloud.exe"

@@ -67,7 +67,7 @@ private slots:
     const auto source = profile.readAll();
     QVERIFY(source.contains("Native notifications"));
     QVERIFY(source.contains("Start AniCloud with my computer"));
-    QVERIFY(source.contains("Startup is off by default"));
+    QVERIFY(source.contains("starts quietly with your computer"));
   }
 
   void runtimeKeepsNotificationsAliveWithoutTheWindow() {
@@ -77,18 +77,22 @@ private slots:
     const auto mainSource = main.readAll();
     QVERIFY(runtimeSource.contains("updateAutoStart"));
     QVERIFY(runtimeSource.contains("notifications/startAtLogin"));
-    QVERIFY(!runtimeSource.contains("updateAutoStart(notificationsEnabled())"));
+    QVERIFY(runtimeSource.contains("notifications/startAtLogin\"), true"));
+    QVERIFY(runtimeSource.contains("updateAutoStart(startAtLogin())"));
     QVERIFY(runtimeSource.contains("lastBroadcastId"));
     QVERIFY(mainSource.contains("--background"));
     QVERIFY(mainSource.contains("QLocalServer"));
     QVERIFY(mainSource.contains("60 * 1000"));
+    QVERIFY(mainSource.contains("else QTimer::singleShot(3000, &updates, &UpdateService::check)"));
+    QVERIFY(mainSource.contains("AniCloud update available"));
   }
 
-  void windowsStartupRequiresExplicitConsent() {
+  void windowsStartupChoiceSurvivesInstallerUpdates() {
     QFile installer(QStringLiteral(ANICLOUD_SOURCE_DIR "/packaging/windows/installer.nsi")); QVERIFY(installer.open(QIODevice::ReadOnly));
     const auto source = installer.readAll();
     QVERIFY(!source.contains("WriteRegStr HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\Run\""));
     QVERIFY(source.contains("DeleteRegValue HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\Run\""));
+    QVERIFY(source.contains("Preserve the user's startup choice across updates"));
   }
 
   void updateInstallationClosesBackgroundProcessAndCanRetry() {
@@ -116,7 +120,10 @@ private slots:
     QVERIFY(source.contains("record.insert(QStringLiteral(\"episodeId\")"));
     QVERIFY(source.contains("record.insert(QStringLiteral(\"audioMode\")"));
     QVERIFY(source.contains("record.insert(QStringLiteral(\"server\")"));
-    QVERIFY(source.contains("ConcurrentResources = 6"));
+    QVERIFY(source.contains("ConcurrentResources = 4"));
+    QVERIFY(source.contains("DownloadRetryPolicy::shouldRetry"));
+    QVERIFY(source.contains("Retry-After"));
+    QVERIFY(source.contains("pendingRetries"));
     QVERIFY(source.contains("m_groups"));
     QVERIFY(source.contains("episodeStatus"));
     QVERIFY(source.contains("offlineExtension(url, resourceKind)"));

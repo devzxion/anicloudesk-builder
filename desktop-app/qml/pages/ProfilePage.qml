@@ -156,7 +156,7 @@ Flickable {
                     Text {
                         Layout.fillWidth: true
                         text: Runtime.trayAvailable
-                              ? "Startup is off by default. Enable it above only if you want AniCloud to start quietly and check for alerts after sign-in. Use the tray icon to reopen or fully quit."
+                              ? "AniCloud starts quietly with your computer to check notifications and signed updates. Disable it above at any time; use the tray icon to reopen or fully quit."
                               : "Background notifications are unavailable because this desktop has no system tray."
                         color: Theme.muted; font.pixelSize: 11; wrapMode: Text.WordWrap
                     }

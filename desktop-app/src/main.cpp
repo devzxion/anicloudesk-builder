@@ -133,6 +133,12 @@ int main(int argc, char *argv[]) {
   QObject::connect(&account, &AccountClient::operationSucceeded, &runtime, [&runtime](const QString &message) { runtime.showNotification(QStringLiteral("AniCloud"), message); });
   QObject::connect(&account, &AccountClient::localProgressSaved, &runtime, &AppRuntime::refreshLocalHistory);
   QObject::connect(&account, &AccountClient::sessionExpired, &runtime, [&runtime] { runtime.setRoute(QStringLiteral("auth")); });
+  QObject::connect(&updates, &UpdateService::updateChanged, &runtime, [&updates, &runtime, backgroundLaunch] {
+    if (backgroundLaunch && updates.updateAvailable())
+      runtime.showNotification(QStringLiteral("AniCloud update available"),
+                               QStringLiteral("AniCloud %1 is ready to download. Open AniCloud to update.")
+                                 .arg(updates.availableVersion()));
+  });
 
   QQmlApplicationEngine engine;
   auto *context = engine.rootContext();
@@ -154,7 +160,7 @@ int main(int argc, char *argv[]) {
   QObject::connect(&broadcastTimer, &QTimer::timeout, &account, &AccountClient::refreshBroadcasts);
   broadcastTimer.start();
   if (smokeTest) QTimer::singleShot(2500, &app, &QCoreApplication::quit);
-  else if (!backgroundLaunch) QTimer::singleShot(3000, &updates, &UpdateService::check);
+  else QTimer::singleShot(3000, &updates, &UpdateService::check);
   for (int index = 1; index < argc; ++index) {
     const auto argument = QString::fromLocal8Bit(argv[index]);
     if (!argument.startsWith(QStringLiteral("--"))) runtime.handleDeepLink(argument);

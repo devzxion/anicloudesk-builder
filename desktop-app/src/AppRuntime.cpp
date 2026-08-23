@@ -43,6 +43,10 @@ AppRuntime::AppRuntime(Database *database, bool backgroundLaunch, QObject *paren
     });
     connect(m_tray, &QSystemTrayIcon::messageClicked, this, &AppRuntime::openNotificationLink);
     if (notificationsEnabled()) m_tray->show();
+    // Recreate a missing registration after an update or install-path change.
+    // New installs start quietly by default; an explicit Profile opt-out is
+    // persisted and removes the platform registration on every later launch.
+    updateAutoStart(startAtLogin());
   }
   refreshLocalHistory();
 }
@@ -64,7 +68,7 @@ bool AppRuntime::captionOutline() const { return m_settings.value(QStringLiteral
 int AppRuntime::downloadQuality() const { return m_settings.value(QStringLiteral("downloads/quality"), 1080).toInt(); }
 bool AppRuntime::allowMeteredDownloads() const { return m_settings.value(QStringLiteral("downloads/allowMetered"), false).toBool(); }
 bool AppRuntime::notificationsEnabled() const { return m_settings.value(QStringLiteral("notifications/enabled"), true).toBool(); }
-bool AppRuntime::startAtLogin() const { return m_settings.value(QStringLiteral("notifications/startAtLogin"), false).toBool(); }
+bool AppRuntime::startAtLogin() const { return m_settings.value(QStringLiteral("notifications/startAtLogin"), true).toBool(); }
 
 void AppRuntime::setRoute(const QString &route) {
   if (route.isEmpty() || m_route == route) return;

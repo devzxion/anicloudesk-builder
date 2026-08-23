@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(AniCloudDesktop VERSION 4.1.1 LANGUAGES CXX)
+project(AniCloudDesktop VERSION 4.1.2 LANGUAGES CXX)
 
 if(WIN32)
   enable_language(RC)
@@ -86,6 +86,8 @@ qt_add_executable(AniCloud WIN32 MACOSX_BUNDLE
   src/PlayerController.cpp
   src/DownloadManager.h
   src/DownloadManager.cpp
+  src/DownloadRetryPolicy.h
+  src/DownloadRetryPolicy.cpp
   src/UpdateService.h
   src/UpdateService.cpp
   src/AppRuntime.h

@@ -2,6 +2,7 @@
 
 #include "ApiClient.h"
 #include "Database.h"
+#include "DownloadRetryPolicy.h"
 #include "HlsTools.h"
 
 #include <QAbstractSocket>
@@ -17,10 +18,12 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QNetworkInformation>
+#include <QRandomGenerator>
 #include <QSaveFile>
 #include <QSettings>
 #include <QSet>
 #include <QStorageInfo>
+#include <QTimer>
 #include <QUrlQuery>
 #include <QUuid>
 #include <QtConcurrent>
@@ -52,14 +55,33 @@ struct DownloadManager::Job {
   int completedResources = 0;
   int totalResources = 0;
   int pendingResolutions = 0;
+  int pendingRetries = 0;
+  int concurrencyLimit = 4;
+  int successfulSinceThrottle = 0;
+  quint64 retryGeneration = 0;
+  QHash<QString, int> retryAttempts;
   bool paused = false;
   bool cancelled = false;
 };
 
 namespace {
-// Six segment requests keeps HLS downloads quick without overwhelming a CDN or
-// starving playback/network work elsewhere in the app.
-constexpr int ConcurrentResources = 6;
+// Four requests retain parallel segment downloads while avoiding the burst of
+// six requests that commonly triggers provider throttling. A 429 temporarily
+// reduces this per-job limit further and successful transfers restore it.
+constexpr int ConcurrentResources = 4;
+constexpr int MinimumConcurrentResources = 1;
+constexpr int SuccessfulResourcesBeforeRecovery = 12;
+
+QString retryKey(const QUrl &url, const QString &relativePath) {
+  return url.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment).toString(QUrl::FullyEncoded)
+         + QLatin1Char('|') + relativePath;
+}
+
+int retryDelayWithJitter(int attempt, const QByteArray &retryAfter) {
+  const int base = DownloadRetryPolicy::delayMs(attempt, retryAfter);
+  const int jitter = QRandomGenerator::global()->bounded(qMax(2, base / 5));
+  return base + jitter;
+}
 
 QByteArray hashFile(const QString &path) {
   QFile file(path); if (!file.open(QIODevice::ReadOnly)) return {};
@@ -284,8 +306,11 @@ void DownloadManager::enqueueEpisode(const QVariantMap &episode, int preferredHe
 }
 
 void DownloadManager::start(Job *job) {
+  ++job->retryGeneration;
   job->queued.clear(); job->expectedPaths.clear(); job->completedUrls.clear(); job->completedPaths.clear();
   job->completedBytes = 0; job->totalBytes = 0; job->completedResources = 0; job->totalResources = 0;
+  job->pendingRetries = 0; job->retryAttempts.clear(); job->concurrencyLimit = ConcurrentResources;
+  job->successfulSinceThrottle = 0;
   job->record.remove(QStringLiteral("failure"));
   for (const auto &value : m_database->downloadResources(job->id)) {
     const auto resource = value.toMap();
@@ -302,16 +327,40 @@ void DownloadManager::start(Job *job) {
   fetchManifest(job, QUrl(job->record.value(QStringLiteral("mediaUrl")).toString()), true);
 }
 
-void DownloadManager::fetchManifest(Job *job, const QUrl &url, bool selectVariant) {
+void DownloadManager::fetchManifest(Job *job, const QUrl &url, bool selectVariant, int attempt) {
   QNetworkRequest request(url); request.setTransferTimeout(30'000);
   request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
   for (auto it = job->headers.cbegin(); it != job->headers.cend(); ++it) request.setRawHeader(it.key().toUtf8(), it.value().toString().toUtf8());
   auto *reply = m_network.get(request);
   job->active.insert(reply, {url, QStringLiteral("offline.m3u8"), {}, QStringLiteral("root-playlist")});
-  connect(reply, &QNetworkReply::finished, this, [this, job, reply, selectVariant] {
+  connect(reply, &QNetworkReply::finished, this, [this, job, reply, selectVariant, attempt] {
     job->active.remove(reply);
     if (job->cancelled || job->paused) { reply->deleteLater(); return; }
-    if (reply->error() != QNetworkReply::NoError) { fail(job, reply->errorString()); reply->deleteLater(); return; }
+    const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const auto networkError = reply->error();
+    if (networkError != QNetworkReply::NoError || status >= 400) {
+      const int nextAttempt = attempt + 1;
+      if (nextAttempt <= DownloadRetryPolicy::MaxAutomaticRetries &&
+          DownloadRetryPolicy::shouldRetry(status, networkError)) {
+        const auto jobId = job->id;
+        const auto generation = job->retryGeneration;
+        const int delay = retryDelayWithJitter(nextAttempt, reply->rawHeader(QByteArrayLiteral("Retry-After")));
+        ++job->pendingRetries;
+        reply->deleteLater();
+        QTimer::singleShot(delay, this, [this, jobId, generation, url, selectVariant, nextAttempt] {
+          auto *activeJob = jobFor(jobId);
+          if (!activeJob || activeJob->retryGeneration != generation) return;
+          activeJob->pendingRetries = qMax(0, activeJob->pendingRetries - 1);
+          if (activeJob->cancelled || activeJob->paused) return;
+          fetchManifest(activeJob, url, selectVariant, nextAttempt);
+        });
+        return;
+      }
+      const auto message = networkError != QNetworkReply::NoError
+        ? reply->errorString()
+        : QStringLiteral("The video provider returned HTTP %1.").arg(status);
+      reply->deleteLater(); fail(job, message); return;
+    }
     const auto body = reply->readAll(); const auto finalUrl = reply->url(); reply->deleteLater();
     if (!HlsTools::looksLikePlaylist(body, finalUrl)) { fail(job, QStringLiteral("The source is not an HLS playlist.")); return; }
     if (selectVariant) {
@@ -390,8 +439,9 @@ bool DownloadManager::queueResource(Job *job, const Resource &resource) {
 
 void DownloadManager::pump(Job *job) {
   if (job->paused || job->cancelled || job->pendingResolutions > 0) return;
-  while (job->active.size() < ConcurrentResources && !job->queued.isEmpty()) fetchResource(job, job->queued.takeFirst());
+  while (job->active.size() < job->concurrencyLimit && !job->queued.isEmpty()) fetchResource(job, job->queued.takeFirst());
   if (job->active.isEmpty() && job->queued.isEmpty()) {
+    if (job->pendingRetries > 0) return;
     update(job, QStringLiteral("validating"));
     if (!QFileInfo::exists(job->root + QStringLiteral("/offline.m3u8"))) { fail(job, QStringLiteral("Offline playlist validation failed.")); return; }
     for (const auto &relative : std::as_const(job->expectedPaths)) {
@@ -431,6 +481,20 @@ void DownloadManager::fetchResource(Job *job, const Resource &resource) {
   auto *reply = m_network.get(request); job->active.insert(reply, resource);
   connect(reply, &QNetworkReply::readyRead, this, [this, job, reply] { writeResourceData(job, reply); });
   connect(reply, &QNetworkReply::finished, this, [this, job, reply] { finishResource(job, reply); });
+}
+
+void DownloadManager::retryResourceLater(Job *job, const Resource &resource, int delayMs) {
+  const auto jobId = job->id;
+  const auto generation = job->retryGeneration;
+  ++job->pendingRetries;
+  QTimer::singleShot(delayMs, this, [this, jobId, generation, resource] {
+    auto *activeJob = jobFor(jobId);
+    if (!activeJob || activeJob->retryGeneration != generation) return;
+    activeJob->pendingRetries = qMax(0, activeJob->pendingRetries - 1);
+    if (activeJob->cancelled) return;
+    activeJob->queued.prepend(resource);
+    if (!activeJob->paused) pump(activeJob);
+  });
 }
 
 void DownloadManager::resolveDownloadHosts(Job *job) {
@@ -476,6 +540,12 @@ void DownloadManager::resolveDownloadHosts(Job *job) {
 
 void DownloadManager::writeResourceData(Job *job, QNetworkReply *reply) {
   if (!job->active.contains(reply)) return;
+  // Error pages (especially HTTP 429 bodies) must never replace a valid
+  // partially downloaded media segment. Keep the .part file for Range resume.
+  if (reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() >= 400) {
+    reply->readAll();
+    return;
+  }
   auto *writer = job->writers.value(reply, nullptr);
   if (!writer) {
     const auto resource = job->active.value(reply);
@@ -508,8 +578,28 @@ void DownloadManager::finishResource(Job *job, QNetworkReply *reply) {
   closeResourceWriter(job, reply);
   if (job->cancelled || job->paused) { reply->deleteLater(); return; }
   const auto writeError = reply->property("anicloudWriteError").toString();
-  if (reply->error() != QNetworkReply::NoError || !writeError.isEmpty()) {
-    const auto message = writeError.isEmpty() ? reply->errorString() : writeError; reply->deleteLater(); fail(job, message); return;
+  const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+  const auto networkError = reply->error();
+  if (networkError != QNetworkReply::NoError || status >= 400 || !writeError.isEmpty()) {
+    const auto key = retryKey(resource.url, resource.relativePath);
+    const int nextAttempt = job->retryAttempts.value(key) + 1;
+    if (writeError.isEmpty() && nextAttempt <= DownloadRetryPolicy::MaxAutomaticRetries &&
+        DownloadRetryPolicy::shouldRetry(status, networkError)) {
+      job->retryAttempts.insert(key, nextAttempt);
+      if (status == 429) {
+        job->concurrencyLimit = qMax(MinimumConcurrentResources, job->concurrencyLimit / 2);
+        job->successfulSinceThrottle = 0;
+      }
+      const int delay = retryDelayWithJitter(nextAttempt, reply->rawHeader(QByteArrayLiteral("Retry-After")));
+      reply->deleteLater();
+      retryResourceLater(job, resource, delay);
+      pump(job);
+      return;
+    }
+    const auto message = !writeError.isEmpty() ? writeError
+      : networkError != QNetworkReply::NoError ? reply->errorString()
+      : QStringLiteral("The video provider returned HTTP %1.").arg(status);
+    reply->deleteLater(); fail(job, message); return;
   }
   const auto finalUrl = reply->url();
   const auto finalPath = job->root + QLatin1Char('/') + resource.relativePath;
@@ -544,6 +634,11 @@ void DownloadManager::finishResource(Job *job, QNetworkReply *reply) {
   QFile::remove(finalPath);
   if (!QFile::rename(partPath, finalPath)) { reply->deleteLater(); fail(job, QStringLiteral("Unable to complete a download resource.")); return; }
   job->completedUrls.insert(resource.url.toString(QUrl::FullyEncoded));
+  job->retryAttempts.remove(retryKey(resource.url, resource.relativePath));
+  if (++job->successfulSinceThrottle >= SuccessfulResourcesBeforeRecovery) {
+    job->successfulSinceThrottle = 0;
+    job->concurrencyLimit = qMin(ConcurrentResources, job->concurrencyLimit + 1);
+  }
   const auto resourceId = QString::fromLatin1(QCryptographicHash::hash((resource.url.toString(QUrl::FullyEncoded) + QLatin1Char('|') + resource.relativePath).toUtf8(), QCryptographicHash::Sha256).toHex());
   m_database->markDownloadResourceCompleted(job->id, resourceId, QFileInfo(finalPath).size());
   job->completedBytes += QFileInfo(finalPath).size(); ++job->completedResources; reply->deleteLater(); update(job); pump(job);
@@ -562,6 +657,8 @@ void DownloadManager::update(Job *job, const QString &state) {
 
 void DownloadManager::fail(Job *job, const QString &message) {
   job->paused = true;
+  ++job->retryGeneration;
+  job->pendingRetries = 0;
   for (auto *reply : job->active.keys()) {
     QObject::disconnect(reply, nullptr, this, nullptr); writeResourceData(job, reply); closeResourceWriter(job, reply); reply->abort(); reply->deleteLater();
   }

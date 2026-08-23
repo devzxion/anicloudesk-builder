@@ -7,6 +7,14 @@ target_compile_definitions(anicloud_hls_tests PRIVATE ANICLOUD_FIXTURE_DIR="${CM
 target_link_libraries(anicloud_hls_tests PRIVATE Qt6::Core Qt6::Network Qt6::Test)
 add_test(NAME hls_tools COMMAND anicloud_hls_tests)
 
+qt_add_executable(anicloud_download_retry_tests
+  test_downloadretrypolicy.cpp
+  ../src/DownloadRetryPolicy.cpp
+)
+target_include_directories(anicloud_download_retry_tests PRIVATE ../src)
+target_link_libraries(anicloud_download_retry_tests PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+add_test(NAME download_retry_backoff COMMAND anicloud_download_retry_tests)
+
 qt_add_executable(anicloud_subtitle_tests
   test_subtitletools.cpp
   ../src/SubtitleTools.cpp

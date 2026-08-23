@@ -55,12 +55,13 @@ private:
   struct Resource;
   struct Job;
   void start(Job *job);
-  void fetchManifest(Job *job, const QUrl &url, bool selectVariant);
+  void fetchManifest(Job *job, const QUrl &url, bool selectVariant, int attempt = 0);
   void prepareMediaManifest(Job *job, const QByteArray &body, const QUrl &url);
   QString localResource(Job *job, const QUrl &url, const QString &resourceKind = {});
   bool queueResource(Job *job, const Resource &resource);
   void pump(Job *job);
   void fetchResource(Job *job, const Resource &resource);
+  void retryResourceLater(Job *job, const Resource &resource, int delayMs);
   void resolveDownloadHosts(Job *job);
   void writeResourceData(Job *job, QNetworkReply *reply);
   void closeResourceWriter(Job *job, QNetworkReply *reply);
