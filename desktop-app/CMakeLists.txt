@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(AniCloudDesktop VERSION 4.1.0 LANGUAGES CXX)
+project(AniCloudDesktop VERSION 4.1.1 LANGUAGES CXX)
 
 if(WIN32)
   enable_language(RC)

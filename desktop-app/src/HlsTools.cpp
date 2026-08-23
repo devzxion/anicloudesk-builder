@@ -1,6 +1,8 @@
 #include "HlsTools.h"
 
+#include <QFileInfo>
 #include <QRegularExpression>
+#include <QSet>
 #include <limits>
 
 namespace {
@@ -121,6 +123,39 @@ QList<Resource> resources(const QByteArray &manifest, const QUrl &baseUrl) {
     }
   }
   return result;
+}
+
+QString offlineExtension(const QUrl &url, const QString &resourceKind) {
+  const auto kind = resourceKind.trimmed().toLower();
+  const auto sourceExtension = QFileInfo(url.path()).suffix().toLower();
+  if (kind == QStringLiteral("playlist") || kind == QStringLiteral("root-playlist"))
+    return QStringLiteral("m3u8");
+  if (kind == QStringLiteral("media")) {
+    if (sourceExtension == QStringLiteral("vtt") || sourceExtension == QStringLiteral("webvtt"))
+      return QStringLiteral("vtt");
+    if (sourceExtension == QStringLiteral("srt")) return QStringLiteral("srt");
+    return QStringLiteral("m3u8");
+  }
+  if (kind == QStringLiteral("subtitle"))
+    return sourceExtension == QStringLiteral("srt") ? QStringLiteral("srt") : QStringLiteral("vtt");
+  if (kind == QStringLiteral("key")) return QStringLiteral("key");
+  if (kind == QStringLiteral("map"))
+    return sourceExtension == QStringLiteral("m4s") ? QStringLiteral("m4s") : QStringLiteral("mp4");
+  if (kind == QStringLiteral("segment")) {
+    static const QSet<QString> mediaExtensions{
+      QStringLiteral("ts"), QStringLiteral("m2ts"), QStringLiteral("mts"),
+      QStringLiteral("m4s"), QStringLiteral("mp4"), QStringLiteral("m4a"),
+      QStringLiteral("aac"), QStringLiteral("mp3"), QStringLiteral("mov"),
+      QStringLiteral("webm"), QStringLiteral("ogg"), QStringLiteral("oga"),
+      QStringLiteral("ogv")
+    };
+    // Several providers deliberately give MPEG-TS segments image, script, or
+    // document suffixes. FFmpeg rejects those names before inspecting their
+    // bytes, so unknown segment suffixes must be exposed as transport streams.
+    return mediaExtensions.contains(sourceExtension) ? sourceExtension : QStringLiteral("ts");
+  }
+  return sourceExtension.isEmpty() || sourceExtension.size() > 8
+    ? QStringLiteral("bin") : sourceExtension;
 }
 
 QByteArray rewrite(const QByteArray &manifest, const QUrl &baseUrl,

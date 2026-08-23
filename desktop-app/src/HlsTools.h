@@ -26,6 +26,7 @@ struct Resource {
 [[nodiscard]] QList<Variant> variants(const QByteArray &manifest, const QUrl &baseUrl);
 [[nodiscard]] Variant selectVariant(const QList<Variant> &items, int preferredHeight);
 [[nodiscard]] QList<Resource> resources(const QByteArray &manifest, const QUrl &baseUrl);
+[[nodiscard]] QString offlineExtension(const QUrl &url, const QString &resourceKind);
 [[nodiscard]] QByteArray rewrite(const QByteArray &manifest, const QUrl &baseUrl,
                                  const std::function<QUrl(const QUrl &)> &mapUrl);
 [[nodiscard]] QByteArray addSubtitleTracks(

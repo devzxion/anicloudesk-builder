@@ -25,6 +25,7 @@ public:
   [[nodiscard]] quint16 port() const { return m_server.serverPort(); }
 
   Q_INVOKABLE QString openSession(const QVariantMap &stream);
+  Q_INVOKABLE QString openOfflineSession(const QString &rootPath);
   Q_INVOKABLE void closeSession(const QString &sessionId);
   Q_INVOKABLE void closeAll();
 
@@ -39,6 +40,7 @@ private:
     QHash<QString, QUrl> resources;
     QHash<QString, QString> identifiers;
     QString rootResourceId;
+    QString localRoot;
     QDateTime expiresAt;
   };
 
@@ -50,6 +52,8 @@ private:
   void proxyResolved(QTcpSocket *socket, const QByteArray &method, const QString &token,
                      const QString &resourceId, const QHash<QByteArray, QByteArray> &incomingHeaders,
                      const QString &publicAddress);
+  void serveLocal(QTcpSocket *socket, const QByteArray &method, const QString &token,
+                  const QString &resourceId, const QHash<QByteArray, QByteArray> &incomingHeaders);
   void resolvePublicAddress(const QString &host, std::function<void(const QString &)> callback);
   QUrl localUrl(const QString &token, const QUrl &upstream, const QString &resourceKind = {});
   void sendError(QTcpSocket *socket, int status, const QByteArray &reason);

@@ -57,7 +57,7 @@ private:
   void start(Job *job);
   void fetchManifest(Job *job, const QUrl &url, bool selectVariant);
   void prepareMediaManifest(Job *job, const QByteArray &body, const QUrl &url);
-  QString localResource(Job *job, const QUrl &url);
+  QString localResource(Job *job, const QUrl &url, const QString &resourceKind = {});
   bool queueResource(Job *job, const Resource &resource);
   void pump(Job *job);
   void fetchResource(Job *job, const Resource &resource);

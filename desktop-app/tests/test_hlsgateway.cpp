@@ -1,5 +1,7 @@
 #include "HlsGateway.h"
 
+#include <QDir>
+#include <QFile>
 #include <QHash>
 #include <QHostAddress>
 #include <QNetworkAccessManager>
@@ -9,6 +11,7 @@
 #include <QSignalSpy>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTemporaryDir>
 #include <QTest>
 
 class HlsGatewayTest final : public QObject {
@@ -146,6 +149,50 @@ private slots:
     QCOMPARE(segment.body, QByteArrayLiteral("FAKE-TS"));
   }
 
+  void servesExistingDownloadsWithoutExternalNetworkAccess() {
+    QTemporaryDir library;
+    QVERIFY(library.isValid());
+    QVERIFY(QDir(library.path()).mkpath(QStringLiteral("resources")));
+    const QByteArray segmentData = QByteArrayLiteral("\x47\x40\x11\x10") + QByteArray(184, '\0');
+    auto writeFile = [](const QString &path, const QByteArray &body) {
+      QFile file(path);
+      return file.open(QIODevice::WriteOnly) && file.write(body) == body.size();
+    };
+    QVERIFY(writeFile(library.filePath(QStringLiteral("offline.m3u8")),
+      QByteArrayLiteral("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=8000000\nmedia.m3u8")));
+    QVERIFY(writeFile(library.filePath(QStringLiteral("media.m3u8")),
+      QByteArrayLiteral("#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4,\nresources/provider-disguised.jpg\n#EXT-X-ENDLIST")));
+    QVERIFY(writeFile(library.filePath(QStringLiteral("resources/provider-disguised.jpg")), segmentData));
+
+    const auto upstreamRequests = m_upstreamRequestCount;
+    HlsGateway gateway;
+    const QUrl root(gateway.openOfflineSession(library.path()));
+    QVERIFY(root.isValid());
+    QVERIFY(root.host() == QStringLiteral("127.0.0.1"));
+
+    const auto master = request(root);
+    QCOMPARE(master.status, 200);
+    const QUrl mediaUrl(QString::fromUtf8(master.body.split('\n').last().trimmed()));
+    QVERIFY(mediaUrl.path().endsWith(QStringLiteral(".m3u8")));
+    const auto media = request(mediaUrl);
+    QCOMPARE(media.status, 200);
+    const QUrl segmentUrl(QString::fromUtf8(media.body.split('\n').at(3).trimmed()));
+    QVERIFY(segmentUrl.path().endsWith(QStringLiteral(".ts")));
+    QVERIFY(!media.body.contains("file:"));
+    QVERIFY(!media.body.contains("provider-disguised.jpg"));
+
+    QCOMPARE(request(segmentUrl).body, segmentData);
+    QNetworkRequest ranged(segmentUrl);
+    ranged.setRawHeader(QByteArrayLiteral("Range"), QByteArrayLiteral("bytes=1-2"));
+    const auto partial = request(ranged);
+    QCOMPARE(partial.status, 206);
+    QCOMPARE(partial.body, segmentData.mid(1, 2));
+    const auto head = request(QNetworkRequest(segmentUrl), true);
+    QCOMPARE(head.status, 200);
+    QCOMPARE(head.contentLength, segmentData.size());
+    QCOMPARE(m_upstreamRequestCount, upstreamRequests);
+  }
+
 private:
   QUrl upstreamUrl(const QString &path) const {
     return QUrl(QStringLiteral("http://127.0.0.1:%1%2").arg(m_upstream.serverPort()).arg(path));
@@ -180,6 +227,7 @@ private:
     if (first.size() < 2) { socket->disconnectFromHost(); return; }
     const auto method = first.at(0);
     const auto path = QUrl::fromEncoded(first.at(1)).path();
+    ++m_upstreamRequestCount;
     m_lastHeaders.clear();
     for (qsizetype index = 1; index < lines.size(); ++index) {
       const auto line = lines.at(index).trimmed();
@@ -239,6 +287,7 @@ private:
 
   QTcpServer m_upstream;
   QHash<QByteArray, QByteArray> m_lastHeaders;
+  int m_upstreamRequestCount = 0;
 };
 
 QTEST_GUILESS_MAIN(HlsGatewayTest)

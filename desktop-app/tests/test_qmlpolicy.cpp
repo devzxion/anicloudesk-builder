@@ -110,6 +110,8 @@ private slots:
 
   void downloadsPersistTheResolvedEpisodeIdentity() {
     QFile downloads(QStringLiteral(ANICLOUD_SOURCE_DIR "/src/DownloadManager.cpp")); QVERIFY(downloads.open(QIODevice::ReadOnly));
+    QFile player(QStringLiteral(ANICLOUD_SOURCE_DIR "/src/PlayerController.cpp")); QVERIFY(player.open(QIODevice::ReadOnly));
+    QFile gateway(QStringLiteral(ANICLOUD_SOURCE_DIR "/src/HlsGateway.cpp")); QVERIFY(gateway.open(QIODevice::ReadOnly));
     const auto source = downloads.readAll();
     QVERIFY(source.contains("record.insert(QStringLiteral(\"episodeId\")"));
     QVERIFY(source.contains("record.insert(QStringLiteral(\"audioMode\")"));
@@ -117,6 +119,14 @@ private slots:
     QVERIFY(source.contains("ConcurrentResources = 6"));
     QVERIFY(source.contains("m_groups"));
     QVERIFY(source.contains("episodeStatus"));
+    QVERIFY(source.contains("offlineExtension(url, resourceKind)"));
+    const auto playerSource = player.readAll();
+    QVERIFY(playerSource.contains("openOfflineSession"));
+    QVERIFY(playerSource.contains("m_offlinePlayback"));
+    QVERIFY(!playerSource.contains("m_player.setSource(QUrl::fromLocalFile(path))"));
+    const auto gatewaySource = gateway.readAll();
+    QVERIFY(gatewaySource.contains("serveLocal"));
+    QVERIFY(gatewaySource.contains("pathIsWithin"));
   }
 
   void downloadAndDiscoverPagesExposeNativeOrganization() {

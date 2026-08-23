@@ -322,11 +322,10 @@ void DownloadManager::fetchManifest(Job *job, const QUrl &url, bool selectVarian
   });
 }
 
-QString DownloadManager::localResource(Job *job, const QUrl &url) {
+QString DownloadManager::localResource(Job *job, const QUrl &url, const QString &resourceKind) {
   const auto key = url.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment).toString(QUrl::FullyEncoded);
   if (job->paths.contains(key)) return job->paths.value(key);
-  auto extension = QFileInfo(url.path()).suffix().toLower();
-  if (extension.isEmpty() || extension.size() > 8) extension = QStringLiteral("bin");
+  const auto extension = HlsTools::offlineExtension(url, resourceKind);
   const auto relative = QStringLiteral("resources/%1.%2")
     .arg(QString::fromLatin1(QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex().left(24)), extension);
   job->paths.insert(key, relative);
@@ -336,7 +335,7 @@ QString DownloadManager::localResource(Job *job, const QUrl &url) {
 void DownloadManager::prepareMediaManifest(Job *job, const QByteArray &body, const QUrl &url) {
   const auto listed = HlsTools::resources(body, url);
   for (const auto &entry : listed) {
-    const auto relative = localResource(job, entry.url);
+    const auto relative = localResource(job, entry.url, entry.kind);
     // Download the complete backing object once. The offline manifest keeps its
     // original EXT-X-BYTERANGE offsets, which remain valid against the full file.
     queueResource(job, {entry.url, relative, {}, entry.kind});
@@ -348,7 +347,7 @@ void DownloadManager::prepareMediaManifest(Job *job, const QByteArray &body, con
     auto subtitle = subtitleValue.toMap();
     const QUrl subtitleUrl(subtitle.value(QStringLiteral("url"), subtitle.value(QStringLiteral("file"))).toString());
     if (subtitleUrl.isValid()) {
-      const auto relative = localResource(job, subtitleUrl);
+      const auto relative = localResource(job, subtitleUrl, QStringLiteral("subtitle"));
       queueResource(job, {subtitleUrl, relative, {}, HlsTools::looksLikePlaylist({}, subtitleUrl) ? QStringLiteral("playlist") : QStringLiteral("subtitle")});
       subtitle.insert(QStringLiteral("localPath"), relative);
       storedSubtitles.append(subtitle);
@@ -529,7 +528,7 @@ void DownloadManager::finishResource(Job *job, QNetworkReply *reply) {
   if (isPlaylist) {
     const auto nested = HlsTools::resources(body, finalUrl);
     for (const auto &entry : nested) {
-      const auto relative = localResource(job, entry.url);
+      const auto relative = localResource(job, entry.url, entry.kind);
       queueResource(job, {entry.url, relative, {}, entry.kind});
     }
     body = HlsTools::rewrite(body, finalUrl, [this, job, finalPath](const QUrl &remote) {

@@ -113,6 +113,7 @@ private:
   void resolve(bool preserveState);
   void applyStream(int generation, const QVariantMap &stream);
   void loadStream(const QVariantMap &stream);
+  void loadOfflineStream();
   void failOrFallback(const QString &message);
   void saveProgress();
   void setState(const QString &state);
@@ -165,6 +166,7 @@ private:
   int m_alternateIndex = -1;
   int m_bufferRetries = 0;
   bool m_triedSecondaryServer = false;
+  bool m_offlinePlayback = false;
   bool m_failureScheduled = false;
   QString m_pendingFailure;
 };

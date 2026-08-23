@@ -3,6 +3,8 @@
 #include "HlsTools.h"
 
 #include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QHostAddress>
 #include <QJsonArray>
@@ -11,6 +13,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPointer>
+#include <QRegularExpression>
 #include <QSet>
 #include <QTcpSocket>
 #include <QUrlQuery>
@@ -33,34 +36,38 @@ bool needsPublicResolution(const QString &host) {
 }
 
 QString localResourceSuffix(const QUrl &upstream, const QString &resourceKind) {
-  const auto kind = resourceKind.toLower();
-  const auto extension = QFileInfo(upstream.path()).suffix().toLower();
-  if (kind == QStringLiteral("playlist")) return QStringLiteral(".m3u8");
-  if (kind == QStringLiteral("subtitle")) return QStringLiteral(".vtt");
-  if (kind == QStringLiteral("key")) return QStringLiteral(".key");
-  if (kind == QStringLiteral("media")) {
-    if (extension == QStringLiteral("vtt") || extension == QStringLiteral("webvtt") ||
-        extension == QStringLiteral("srt")) return QStringLiteral(".vtt");
-    return QStringLiteral(".m3u8");
-  }
+  return QStringLiteral(".") + HlsTools::offlineExtension(upstream, resourceKind);
+}
 
-  static const QSet<QString> allowedMediaExtensions{
-    QStringLiteral("ts"), QStringLiteral("m2ts"), QStringLiteral("mts"),
-    QStringLiteral("m4s"), QStringLiteral("mp4"), QStringLiteral("m4a"),
-    QStringLiteral("aac"), QStringLiteral("mp3"), QStringLiteral("mov"),
-    QStringLiteral("webm"), QStringLiteral("ogg"), QStringLiteral("oga"),
-    QStringLiteral("ogv")
-  };
-  if (kind == QStringLiteral("map"))
-    return extension == QStringLiteral("m4s") ? QStringLiteral(".m4s") : QStringLiteral(".mp4");
-  if (kind == QStringLiteral("segment"))
-    return allowedMediaExtensions.contains(extension) ? QStringLiteral(".") + extension : QStringLiteral(".ts");
+Qt::CaseSensitivity localPathCaseSensitivity() {
+#if defined(Q_OS_WIN)
+  return Qt::CaseInsensitive;
+#else
+  return Qt::CaseSensitive;
+#endif
+}
 
-  if (extension == QStringLiteral("m3u8")) return QStringLiteral(".m3u8");
-  if (extension == QStringLiteral("vtt") || extension == QStringLiteral("webvtt") ||
-      extension == QStringLiteral("srt")) return QStringLiteral(".vtt");
-  if (allowedMediaExtensions.contains(extension)) return QStringLiteral(".") + extension;
-  return QStringLiteral(".bin");
+QString normalizedLocalPath(const QString &path) {
+  return QDir::cleanPath(QDir::fromNativeSeparators(path));
+}
+
+bool pathIsWithin(const QString &path, const QString &root) {
+  const auto normalizedPath = normalizedLocalPath(path);
+  auto normalizedRoot = normalizedLocalPath(root);
+  if (normalizedPath.compare(normalizedRoot, localPathCaseSensitivity()) == 0) return true;
+  if (!normalizedRoot.endsWith(QLatin1Char('/'))) normalizedRoot.append(QLatin1Char('/'));
+  return normalizedPath.startsWith(normalizedRoot, localPathCaseSensitivity());
+}
+
+QByteArray localContentType(const QString &resourceId) {
+  const auto extension = QFileInfo(resourceId).suffix().toLower();
+  if (extension == QStringLiteral("m3u8")) return QByteArrayLiteral("application/vnd.apple.mpegurl");
+  if (extension == QStringLiteral("vtt") || extension == QStringLiteral("srt")) return QByteArrayLiteral("text/vtt; charset=utf-8");
+  if (extension == QStringLiteral("ts") || extension == QStringLiteral("m2ts") || extension == QStringLiteral("mts")) return QByteArrayLiteral("video/mp2t");
+  if (extension == QStringLiteral("mp4")) return QByteArrayLiteral("video/mp4");
+  if (extension == QStringLiteral("m4s")) return QByteArrayLiteral("video/iso.segment");
+  if (extension == QStringLiteral("aac")) return QByteArrayLiteral("audio/aac");
+  return QByteArrayLiteral("application/octet-stream");
 }
 }
 
@@ -104,6 +111,27 @@ QString HlsGateway::openSession(const QVariantMap &stream) {
   return result.toString(QUrl::FullyEncoded);
 }
 
+QString HlsGateway::openOfflineSession(const QString &rootPath) {
+  if (!ensureListening()) return {};
+  const QFileInfo rootInfo(rootPath);
+  const auto root = normalizedLocalPath(rootInfo.canonicalFilePath());
+  if (!rootInfo.isDir() || root.isEmpty()) return {};
+  const QFileInfo playlistInfo(QDir(root).absoluteFilePath(QStringLiteral("offline.m3u8")));
+  const auto playlist = normalizedLocalPath(playlistInfo.canonicalFilePath());
+  if (!playlistInfo.isFile() || playlist.isEmpty() || !pathIsWithin(playlist, root)) return {};
+
+  const auto token = QUuid::createUuid().toString(QUuid::WithoutBraces).remove(QLatin1Char('-'));
+  Session session;
+  session.localRoot = root;
+  session.expiresAt = QDateTime::currentDateTimeUtc().addSecs(SessionLifetimeMinutes * 60);
+  m_sessions.insert(token, session);
+  const auto result = localUrl(token, QUrl::fromLocalFile(playlist), QStringLiteral("playlist"));
+  const auto path = result.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+  if (path.size() != 3) { m_sessions.remove(token); return {}; }
+  m_sessions[token].rootResourceId = path.at(2);
+  return result.toString(QUrl::FullyEncoded);
+}
+
 void HlsGateway::closeSession(const QString &sessionId) { m_sessions.remove(sessionId); }
 
 void HlsGateway::closeAll() { m_sessions.clear(); }
@@ -111,7 +139,15 @@ void HlsGateway::closeAll() { m_sessions.clear(); }
 QUrl HlsGateway::localUrl(const QString &token, const QUrl &upstream, const QString &resourceKind) {
   auto it = m_sessions.find(token);
   if (it == m_sessions.end()) return {};
-  const auto normalized = upstream.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment).toString(QUrl::FullyEncoded);
+  auto source = upstream;
+  if (!it->localRoot.isEmpty()) {
+    if (!source.isLocalFile()) return {};
+    const QFileInfo localInfo(source.toLocalFile());
+    const auto canonical = normalizedLocalPath(localInfo.canonicalFilePath());
+    if (!localInfo.isFile() || canonical.isEmpty() || !pathIsWithin(canonical, it->localRoot)) return {};
+    source = QUrl::fromLocalFile(canonical);
+  }
+  const auto normalized = source.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment).toString(QUrl::FullyEncoded);
   // A direct media playlist needs a second opaque URL so the root URL can serve
   // a synthetic master. Other resources retain URL-based deduplication so the
   // kind discovered while parsing (for example a disguised .ts segment) wins.
@@ -120,12 +156,12 @@ QUrl HlsGateway::localUrl(const QString &token, const QUrl &upstream, const QStr
   auto id = it->identifiers.value(identifier);
   if (id.isEmpty()) {
     const auto baseId = QString::fromLatin1(QCryptographicHash::hash(identifier.toUtf8(), QCryptographicHash::Sha256).toHex().left(24));
-    const auto suffix = localResourceSuffix(upstream, resourceKind);
+    const auto suffix = localResourceSuffix(source, resourceKind);
     id = baseId + suffix;
     int collision = 0;
-    while (it->resources.contains(id) && it->resources.value(id) != upstream)
+    while (it->resources.contains(id) && it->resources.value(id) != source)
       id = baseId + QStringLiteral("-%1").arg(++collision) + suffix;
-    it->resources.insert(id, upstream);
+    it->resources.insert(id, source);
     it->identifiers.insert(identifier, id);
   }
   return QUrl(QStringLiteral("http://127.0.0.1:%1/s/%2/%3").arg(m_server.serverPort()).arg(token, id));
@@ -170,6 +206,11 @@ void HlsGateway::proxy(QTcpSocket *socket, const QByteArray &method, const QStri
   const auto upstream = it->resources.value(resourceId);
   if (!upstream.isValid()) { sendError(socket, 404, QByteArrayLiteral("Not Found")); return; }
   it->expiresAt = QDateTime::currentDateTimeUtc().addSecs(SessionLifetimeMinutes * 60);
+  if (upstream.isLocalFile()) {
+    serveLocal(socket, method, token, resourceId, incomingHeaders);
+    return;
+  }
+  if (!it->localRoot.isEmpty()) { sendError(socket, 404, QByteArrayLiteral("Not Found")); return; }
   if (needsPublicResolution(upstream.host())) {
     const QPointer<QTcpSocket> guardedSocket(socket);
     resolvePublicAddress(upstream.host(), [this, guardedSocket, method, token, resourceId, incomingHeaders](const QString &address) {
@@ -179,6 +220,89 @@ void HlsGateway::proxy(QTcpSocket *socket, const QByteArray &method, const QStri
     return;
   }
   proxyResolved(socket, method, token, resourceId, incomingHeaders, {});
+}
+
+void HlsGateway::serveLocal(QTcpSocket *socket, const QByteArray &method, const QString &token,
+                            const QString &resourceId,
+                            const QHash<QByteArray, QByteArray> &incomingHeaders) {
+  auto session = m_sessions.find(token);
+  if (session == m_sessions.end() || session->localRoot.isEmpty()) {
+    sendError(socket, 410, QByteArrayLiteral("Gone")); return;
+  }
+  const auto source = session->resources.value(resourceId);
+  const QFileInfo sourceInfo(source.toLocalFile());
+  const auto canonical = normalizedLocalPath(sourceInfo.canonicalFilePath());
+  if (!source.isLocalFile() || !sourceInfo.isFile() || canonical.isEmpty() ||
+      !pathIsWithin(canonical, session->localRoot)) {
+    sendError(socket, 404, QByteArrayLiteral("Not Found")); return;
+  }
+
+  QFile file(canonical);
+  if (!file.open(QIODevice::ReadOnly)) { sendError(socket, 404, QByteArrayLiteral("Not Found")); return; }
+  QByteArray body;
+  auto contentType = localContentType(resourceId);
+  if (resourceId.endsWith(QStringLiteral(".m3u8"), Qt::CaseInsensitive)) {
+    body = file.readAll();
+    const auto baseUrl = QUrl::fromLocalFile(canonical);
+    bool validManifest = true;
+    for (const auto &resource : HlsTools::resources(body, baseUrl))
+      if (localUrl(token, resource.url, resource.kind).isEmpty()) validManifest = false;
+    if (validManifest) {
+      body = HlsTools::rewrite(body, baseUrl, [this, token, &validManifest](const QUrl &url) {
+        const auto mapped = localUrl(token, url);
+        if (mapped.isEmpty()) validManifest = false;
+        return mapped;
+      });
+    }
+    if (!validManifest) { sendError(socket, 403, QByteArrayLiteral("Forbidden")); return; }
+  }
+
+  qint64 start = 0;
+  qint64 end = resourceId.endsWith(QStringLiteral(".m3u8"), Qt::CaseInsensitive)
+    ? body.size() - 1 : file.size() - 1;
+  int status = 200;
+  const auto range = incomingHeaders.value(QByteArrayLiteral("range"));
+  if (!range.isEmpty() && !resourceId.endsWith(QStringLiteral(".m3u8"), Qt::CaseInsensitive)) {
+    const QRegularExpression expression(QStringLiteral("^bytes=(\\d*)-(\\d*)$"));
+    const auto match = expression.match(QString::fromLatin1(range).trimmed());
+    bool startOk = false;
+    bool endOk = false;
+    const auto requestedStart = match.hasMatch() ? match.captured(1).toLongLong(&startOk) : 0;
+    const auto requestedEnd = match.hasMatch() ? match.captured(2).toLongLong(&endOk) : 0;
+    if (!match.hasMatch() || (!startOk && !endOk) || file.size() <= 0) {
+      sendError(socket, 416, QByteArrayLiteral("Range Not Satisfiable")); return;
+    }
+    if (startOk) {
+      start = requestedStart;
+      end = endOk ? requestedEnd : file.size() - 1;
+    } else {
+      const auto suffixLength = qMin(requestedEnd, file.size());
+      start = file.size() - suffixLength;
+      end = file.size() - 1;
+    }
+    if (start < 0 || start >= file.size() || end < start) {
+      sendError(socket, 416, QByteArrayLiteral("Range Not Satisfiable")); return;
+    }
+    end = qMin(end, file.size() - 1);
+    status = 206;
+  }
+
+  const auto contentLength = qMax<qint64>(0, end - start + 1);
+  if (method != QByteArrayLiteral("HEAD") && !resourceId.endsWith(QStringLiteral(".m3u8"), Qt::CaseInsensitive)) {
+    if (!file.seek(start)) { sendError(socket, 500, QByteArrayLiteral("Internal Server Error")); return; }
+    body = file.read(contentLength);
+    if (body.size() != contentLength) { sendError(socket, 500, QByteArrayLiteral("Internal Server Error")); return; }
+  }
+
+  QByteArray response = QByteArrayLiteral("HTTP/1.1 ") + QByteArray::number(status) + QByteArrayLiteral(" ") + reasonFor(status) + QByteArrayLiteral("\r\n");
+  response += QByteArrayLiteral("Connection: close\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nAccept-Ranges: bytes\r\n");
+  response += QByteArrayLiteral("Content-Type: ") + contentType + QByteArrayLiteral("\r\n");
+  if (status == 206)
+    response += QByteArrayLiteral("Content-Range: bytes ") + QByteArray::number(start) + QByteArrayLiteral("-") + QByteArray::number(end) + QByteArrayLiteral("/") + QByteArray::number(file.size()) + QByteArrayLiteral("\r\n");
+  response += QByteArrayLiteral("Content-Length: ") + QByteArray::number(contentLength) + QByteArrayLiteral("\r\n\r\n");
+  socket->write(response);
+  if (method != QByteArrayLiteral("HEAD")) socket->write(body);
+  socket->disconnectFromHost();
 }
 
 void HlsGateway::proxyResolved(QTcpSocket *socket, const QByteArray &method, const QString &token,
@@ -301,11 +425,13 @@ QByteArray HlsGateway::reasonFor(int status) {
     case 200: return QByteArrayLiteral("OK");
     case 206: return QByteArrayLiteral("Partial Content");
     case 400: return QByteArrayLiteral("Bad Request");
+    case 403: return QByteArrayLiteral("Forbidden");
     case 404: return QByteArrayLiteral("Not Found");
     case 405: return QByteArrayLiteral("Method Not Allowed");
     case 410: return QByteArrayLiteral("Gone");
     case 416: return QByteArrayLiteral("Range Not Satisfiable");
     case 431: return QByteArrayLiteral("Request Header Fields Too Large");
+    case 500: return QByteArrayLiteral("Internal Server Error");
     case 502: return QByteArrayLiteral("Bad Gateway");
     default: return QByteArrayLiteral("Upstream Response");
   }

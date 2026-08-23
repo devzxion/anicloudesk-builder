@@ -68,7 +68,10 @@ PlayerController::PlayerController(ProviderClient *provider, AccountClient *acco
   m_bufferTimer.setSingleShot(true);
   m_bufferTimer.setInterval(15'000);
   connect(&m_bufferTimer, &QTimer::timeout, this, [this] {
-    if (++m_bufferRetries <= 1) { const auto at = position(); m_player.stop(); m_restorePosition = at; loadStream(m_stream); }
+    if (++m_bufferRetries <= 1) {
+      const auto at = position(); m_player.stop(); m_restorePosition = at;
+      if (m_offlinePlayback) loadOfflineStream(); else loadStream(m_stream);
+    }
     else failOrFallback(QStringLiteral("Playback remained stalled."));
   });
 }
@@ -102,6 +105,7 @@ void PlayerController::scheduleFailure(const QString &message) {
 }
 
 void PlayerController::open(const QVariantMap &episode, qint64 resumeMilliseconds) {
+  m_offlinePlayback = false;
   const auto configuredQuality = QSettings().value(QStringLiteral("playback/quality"), QStringLiteral("auto")).toString().toLower();
   if (configuredQuality != m_quality) { m_quality = configuredQuality; emit qualityChanged(); }
   m_restoreSpeed = speed();
@@ -150,6 +154,7 @@ void PlayerController::openOffline(const QVariantMap &download) {
   if (!m_sessionId.isEmpty()) m_gateway->closeSession(m_sessionId);
   m_sessionId.clear();
   m_current = download; m_stream = download;
+  m_offlinePlayback = true;
   m_server = download.value(QStringLiteral("server"), QStringLiteral("offline")).toString();
   m_audioMode = download.value(QStringLiteral("audioMode"), QStringLiteral("sub")).toString();
   m_captions = download.value(QStringLiteral("subtitles")).toList();
@@ -157,8 +162,7 @@ void PlayerController::openOffline(const QVariantMap &download) {
   m_restorePlaying = true; m_bufferRetries = 0; m_lastProgressPosition = 0;
   emit captionsChanged(); emit currentChanged(); setError({}); setState(QStringLiteral("loading"));
   if (m_captionsEnabled && !m_captions.isEmpty()) loadCaption(0);
-  m_player.setSource(QUrl::fromLocalFile(path));
-  m_player.play();
+  loadOfflineStream();
 }
 
 void PlayerController::resolve(bool preserveState) {
@@ -212,7 +216,31 @@ void PlayerController::loadStream(const QVariantMap &stream) {
   m_player.play();
 }
 
+void PlayerController::loadOfflineStream() {
+  if (!m_sessionId.isEmpty()) m_gateway->closeSession(m_sessionId);
+  const auto local = m_gateway->openOfflineSession(m_current.value(QStringLiteral("rootPath")).toString());
+  if (local.isEmpty()) {
+    m_player.stop();
+    setError(QStringLiteral("The downloaded episode is incomplete or its files are unavailable."));
+    setState(QStringLiteral("error"));
+    return;
+  }
+  const auto parts = QUrl(local).path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+  m_sessionId = parts.size() >= 2 ? parts.at(1) : QString{};
+  setError({}); setState(QStringLiteral("loading"));
+  m_player.setSource(QUrl(local));
+  m_player.play();
+}
+
 void PlayerController::failOrFallback(const QString &message) {
+  if (m_offlinePlayback) {
+    saveProgress();
+    if (m_restorePosition <= 0) m_restorePosition = position();
+    m_player.stop();
+    setError(message.isEmpty() ? QStringLiteral("This downloaded episode could not be played.") : message);
+    setState(QStringLiteral("error"));
+    return;
+  }
   const auto alternates = m_stream.value(QStringLiteral("alternates")).toList();
   while (++m_alternateIndex < alternates.size()) {
     auto alternate = m_stream;
@@ -266,6 +294,7 @@ void PlayerController::cycleVolumeBoost() {
 void PlayerController::applyAudioGain() { m_audio.setVolume(static_cast<float>(qMin(1.0, m_volume * m_volumeBoost))); }
 void PlayerController::setSpeed(double speed) { m_player.setPlaybackRate(qBound(0.25, speed, 3.0)); }
 void PlayerController::setQuality(const QString &quality) {
+  if (m_offlinePlayback) return;
   const auto normalized = quality.trimmed().toLower();
   if (normalized.isEmpty() || normalized == m_quality) return;
   m_quality = normalized; QSettings().setValue(QStringLiteral("playback/quality"), normalized); emit qualityChanged();
@@ -439,13 +468,18 @@ void PlayerController::refreshTracks() {
 }
 
 void PlayerController::switchServer(const QString &server) {
+  if (m_offlinePlayback) return;
   const auto normalized = server == QStringLiteral("hd-1") ? QStringLiteral("hd-1") : QStringLiteral("hd-2");
   QSettings().setValue(QStringLiteral("playback/server"), normalized);
   if (normalized == m_server) return;
   m_server = normalized; m_current.insert(QStringLiteral("server"), normalized); emit currentChanged(); m_triedSecondaryServer = false; resolve(true);
 }
-void PlayerController::switchAudio(const QString &audioMode) { if (audioMode == m_audioMode) return; m_audioMode = audioMode; m_current.insert(QStringLiteral("audioMode"), audioMode); emit currentChanged(); m_triedSecondaryServer = false; resolve(true); }
-void PlayerController::retry() { m_triedSecondaryServer = false; resolve(m_state != QStringLiteral("error")); }
+void PlayerController::switchAudio(const QString &audioMode) { if (m_offlinePlayback || audioMode == m_audioMode) return; m_audioMode = audioMode; m_current.insert(QStringLiteral("audioMode"), audioMode); emit currentChanged(); m_triedSecondaryServer = false; resolve(true); }
+void PlayerController::retry() {
+  m_triedSecondaryServer = false;
+  if (m_offlinePlayback) { m_restorePosition = position(); loadOfflineStream(); }
+  else resolve(m_state != QStringLiteral("error"));
+}
 void PlayerController::skipIntro() { if (introEnd() > 0) seek(introEnd()); }
 void PlayerController::skipOutro() { if (outroEnd() > 0) seek(outroEnd()); else nextEpisode(); }
 
@@ -465,6 +499,7 @@ void PlayerController::close() {
   saveProgress(); m_player.stop(); m_player.setSource(QUrl{});
   if (!m_sessionId.isEmpty()) m_gateway->closeSession(m_sessionId);
   m_sessionId.clear(); m_current.clear(); m_stream.clear(); m_captions.clear();
+  m_offlinePlayback = false;
   cancelCaptionRequest(); m_subtitleCues.clear(); m_subtitleText.clear(); m_selectedCaptionIndex = -1; setCaptionStatus(QStringLiteral("off"));
   m_pendingFailure.clear(); m_failureScheduled = false;
   setError({}); setState(QStringLiteral("idle")); emit captionsChanged(); emit currentChanged();

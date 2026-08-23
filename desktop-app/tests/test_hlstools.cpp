@@ -48,6 +48,13 @@ private slots:
     QVERIFY(offline.contains("resources/en.vtt"));
     QVERIFY(offline.endsWith("media.m3u8"));
   }
+
+  void assignsPlayableExtensionsToOfflineResources() {
+    QCOMPARE(HlsTools::offlineExtension(QUrl(QStringLiteral("https://cdn.example/disguised.jpg")), QStringLiteral("segment")), QStringLiteral("ts"));
+    QCOMPARE(HlsTools::offlineExtension(QUrl(QStringLiteral("https://cdn.example/chunk.m4s")), QStringLiteral("segment")), QStringLiteral("m4s"));
+    QCOMPARE(HlsTools::offlineExtension(QUrl(QStringLiteral("https://cdn.example/key.php")), QStringLiteral("key")), QStringLiteral("key"));
+    QCOMPARE(HlsTools::offlineExtension(QUrl(QStringLiteral("https://cdn.example/en.vtt")), QStringLiteral("media")), QStringLiteral("vtt"));
+  }
 };
 
 QTEST_GUILESS_MAIN(HlsToolsTest)
