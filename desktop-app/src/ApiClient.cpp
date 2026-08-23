@@ -352,6 +352,42 @@ QVariantList ProviderClient::parseEpisodeNamesHtml(const QString &html, const QS
   return result;
 }
 
+int ProviderClient::parseEpisodeCountHtml(const QString &html, int fallback) {
+  int maximum = qMax(0, fallback);
+
+  auto paginations = rx(QStringLiteral(
+    "<div\\b[^>]*class\\s*=\\s*[\\\"'][^\\\"']*pagination[^\\\"']*[\\\"'][^>]*>(.*?)</div>"))
+                       .globalMatch(html);
+  while (paginations.hasNext()) {
+    auto anchors = rx(QStringLiteral("<a\\b[^>]*>.*?</a>"))
+                     .globalMatch(paginations.next().captured(1));
+    while (anchors.hasNext()) {
+      const auto tag = anchors.next().captured(0);
+      const auto range = rx(QStringLiteral("(\\d+)\\s*-\\s*(\\d+)"))
+                           .match(htmlText(tag));
+      if (range.hasMatch()) {
+        maximum = qMax(maximum, range.captured(2).toInt());
+        continue;
+      }
+      const auto offset = capture(htmlAttribute(tag, QStringLiteral("href")),
+                                  QStringLiteral("[?&]offset=(\\d+)"));
+      if (!offset.isEmpty()) maximum = qMax(maximum, offset.toInt() + 100);
+    }
+  }
+
+  auto episodeLinks = rx(QStringLiteral(
+    "<a\\b[^>]*href\\s*=\\s*[\\\"'][^\\\"']*/episode/(\\d+)(?:[/?#][^\\\"']*)?[\\\"'][^>]*>"))
+                        .globalMatch(html);
+  while (episodeLinks.hasNext()) maximum = qMax(maximum, episodeLinks.next().captured(1).toInt());
+
+  auto rawNumbers = rx(QStringLiteral(
+    "<td\\b[^>]*class\\s*=\\s*[\\\"'][^\\\"']*episode-number[^\\\"']*[\\\"'][^>]*data-raw\\s*=\\s*[\\\"'](\\d+)[\\\"'][^>]*>"))
+                      .globalMatch(html);
+  while (rawNumbers.hasNext()) maximum = qMax(maximum, rawNumbers.next().captured(1).toInt());
+
+  return qBound(0, maximum, 3000);
+}
+
 QVariantMap ProviderClient::parseAnimeDetailsHtml(const QString &html, const QString &animeId,
                                                   QVariantList *recommendations) {
   auto title = htmlText(capture(html, QStringLiteral(
@@ -526,8 +562,8 @@ void ProviderClient::loadDetails(const QString &animeId) {
     QString::fromUtf8(QUrl::toPercentEncoding(animeId))));
   getText(url, malHeaders(), [this, animeId](const QByteArray &body, const QUrl &finalUrl) {
     m_details = parseAnimeDetailsHtml(QString::fromUtf8(body), animeId, &m_recommendations);
-    const auto episodeCount = qMax(1, m_details.value(QStringLiteral("episodes")).toInt());
-    applyEpisodes(animeId, episodeCount);
+    const auto episodeCount = qMax(0, m_details.value(QStringLiteral("episodes")).toInt());
+    if (episodeCount > 0) applyEpisodes(animeId, episodeCount);
     emit detailsChanged();
     auto episodeUrl = finalUrl;
     auto path = episodeUrl.path();
@@ -539,15 +575,24 @@ void ProviderClient::loadDetails(const QString &animeId) {
 }
 
 void ProviderClient::applyEpisodes(const QString &animeId, int episodeCount) {
-  m_episodes.clear();
+  QVariantList episodes;
+  episodes.reserve(qBound(1, episodeCount, 3000));
   for (int number = 1; number <= qBound(1, episodeCount, 3000); ++number) {
-    m_episodes.append(QVariantMap{
-      {QStringLiteral("id"), QStringLiteral("%1::ep=%2").arg(animeId).arg(number)},
-      {QStringLiteral("animeId"), animeId},
-      {QStringLiteral("number"), number},
-      {QStringLiteral("title"), QStringLiteral("Episode %1").arg(number)},
-    });
+    QVariantMap episode;
+    if (number <= m_episodes.size()) {
+      const auto existing = m_episodes.at(number - 1).toMap();
+      if (existing.value(QStringLiteral("animeId")).toString() == animeId &&
+          existing.value(QStringLiteral("number")).toInt() == number)
+        episode = existing;
+    }
+    episode.insert(QStringLiteral("id"), QStringLiteral("%1::ep=%2").arg(animeId).arg(number));
+    episode.insert(QStringLiteral("animeId"), animeId);
+    episode.insert(QStringLiteral("number"), number);
+    if (episode.value(QStringLiteral("title")).toString().isEmpty())
+      episode.insert(QStringLiteral("title"), QStringLiteral("Episode %1").arg(number));
+    episodes.append(episode);
   }
+  m_episodes = episodes;
 }
 
 void ProviderClient::loadEpisodeTitlesPage(const QString &animeId, const QUrl &episodeUrl,
@@ -561,7 +606,15 @@ void ProviderClient::loadEpisodeTitlesPage(const QString &animeId, const QUrl &e
   getText(pageUrl, malHeaders(), [this, animeId, episodeUrl, offset, episodeCount]
           (const QByteArray &body, const QUrl &) {
     if (m_details.value(QStringLiteral("id")).toString() != animeId) return;
-    const auto named = parseEpisodeNamesHtml(QString::fromUtf8(body), animeId);
+    const auto html = QString::fromUtf8(body);
+    const auto named = parseEpisodeNamesHtml(html, animeId);
+    int resolvedCount = parseEpisodeCountHtml(html, episodeCount);
+    for (const auto &value : named)
+      resolvedCount = qMax(resolvedCount, value.toMap().value(QStringLiteral("number")).toInt());
+    resolvedCount = qBound(1, resolvedCount, 3000);
+    applyEpisodes(animeId, resolvedCount);
+    m_details.insert(QStringLiteral("episodes"), resolvedCount);
+    m_details.insert(QStringLiteral("subEpisodes"), resolvedCount);
     for (const auto &value : named) {
       const auto item = value.toMap();
       const auto index = item.value(QStringLiteral("number")).toInt() - 1;
@@ -572,11 +625,18 @@ void ProviderClient::loadEpisodeTitlesPage(const QString &animeId, const QUrl &e
       episode.insert(QStringLiteral("alternativeTitle"), item.value(QStringLiteral("alternativeTitle")));
       m_episodes[index] = episode;
     }
-    if (!named.isEmpty()) emit detailsChanged();
+    emit detailsChanged();
     const auto nextOffset = offset + 100;
-    if (!named.isEmpty() && nextOffset < episodeCount)
-      loadEpisodeTitlesPage(animeId, episodeUrl, nextOffset, episodeCount);
-  }, {}, false);
+    if (!named.isEmpty() && nextOffset < resolvedCount)
+      loadEpisodeTitlesPage(animeId, episodeUrl, nextOffset, resolvedCount);
+  }, [this, animeId, episodeCount](const QString &) {
+    if (m_details.value(QStringLiteral("id")).toString() != animeId || !m_episodes.isEmpty()) return;
+    const auto fallbackCount = qMax(1, episodeCount);
+    applyEpisodes(animeId, fallbackCount);
+    m_details.insert(QStringLiteral("episodes"), fallbackCount);
+    m_details.insert(QStringLiteral("subEpisodes"), fallbackCount);
+    emit detailsChanged();
+  }, false);
 }
 
 void ProviderClient::loadEpisodes(const QString &animeId, int offset, int limit) {

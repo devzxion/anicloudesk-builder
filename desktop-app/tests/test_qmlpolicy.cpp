@@ -16,9 +16,10 @@ private slots:
     QFile player(QStringLiteral(ANICLOUD_SOURCE_DIR "/qml/pages/PlayerPage.qml")); QVERIFY(player.open(QIODevice::ReadOnly));
     QVERIFY(navigation.readAll().contains("Accessible.name"));
     const auto playerSource = player.readAll();
-    for (const auto *shortcut : {"Space", "Left", "Right", "Up", "Down", "M", "C", "Escape"}) QVERIFY2(playerSource.contains(shortcut), shortcut);
+    for (const auto *shortcut : {"Space", "Left", "Right", "Up", "Down", "M", "C", "N", "Escape"}) QVERIFY2(playerSource.contains(shortcut), shortcut);
     QVERIFY(playerSource.contains("canSkipIntro"));
     QVERIFY(playerSource.contains("canSkipOutro"));
+    QVERIFY(playerSource.contains("interval: 4000"));
   }
 
   void shellBrandingAndNavigationMatchDesktopDesign() {
@@ -43,6 +44,8 @@ private slots:
     const auto source = details.readAll();
     QVERIFY(source.contains("text: \"Share\""));
     QVERIFY(source.contains("Runtime.shareAnime"));
+    QVERIFY(source.contains("Episode number or title"));
+    QVERIFY(source.contains("episodeName"));
   }
 
   void profileExplainsBackgroundNotifications() {

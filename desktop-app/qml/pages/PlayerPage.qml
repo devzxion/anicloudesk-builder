@@ -11,6 +11,7 @@ Rectangle {
     property bool controlsVisible: true
     property bool scrubbing: false
     readonly property bool compact: width < 920
+    readonly property bool controlsLocked: scrubbing || captionsPopup.opened || settingsPopup.opened || !Player.playing
     readonly property bool initialBuffering: (Player.state === "loading" || Player.state === "resolving" || Player.state === "buffering") && Player.position < 500
     readonly property bool canSkipIntro: Player.introEnd > Player.introStart && Player.position >= Player.introStart && Player.position < Player.introEnd
     readonly property bool canSkipOutro: Player.outroEnd > Player.outroStart && Player.position >= Player.outroStart && Player.position < Player.outroEnd
@@ -50,15 +51,16 @@ Rectangle {
 
     Timer {
         id: hideTimer
-        interval: 3600
+        interval: 4000
         repeat: false
-        onTriggered: if (Player.playing && !root.scrubbing && !captionsPopup.opened && !settingsPopup.opened) root.controlsVisible = false
+        onTriggered: if (!root.controlsLocked) root.controlsVisible = false
     }
 
     Rectangle {
         id: topShade
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-        height: 132; visible: root.controlsVisible; z: 3
+        height: 132; opacity: root.controlsVisible ? 1 : 0; visible: opacity > 0; z: 3
+        Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
         gradient: Gradient {
             GradientStop { position: 0; color: "#D9000000" }
             GradientStop { position: 1; color: "#00000000" }
@@ -89,7 +91,9 @@ Rectangle {
 
     Row {
         anchors.centerIn: parent; spacing: 24; z: 4
-        visible: root.controlsVisible && !root.initialBuffering && Player.state !== "error"
+        opacity: root.controlsVisible && !root.initialBuffering && Player.state !== "error" ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 140 } }
         PlayerIconButton { iconName: "back10"; tooltip: "Back 10 seconds (Left)"; iconSize: 29; onClicked: { Player.seekBy(-10000); root.revealControls() } }
         PlayerIconButton {
             iconName: Player.playing ? "pause" : "play"; tooltip: Player.playing ? "Pause (Space)" : "Play (Space)"
@@ -115,7 +119,8 @@ Rectangle {
     Rectangle {
         id: bottomShade
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-        height: 172; visible: root.controlsVisible; z: 4
+        height: 178; opacity: root.controlsVisible ? 1 : 0; visible: opacity > 0; z: 4
+        Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
         gradient: Gradient {
             GradientStop { position: 0; color: "#00000000" }
             GradientStop { position: 1; color: "#E8000000" }
@@ -131,6 +136,8 @@ Rectangle {
                 Accessible.name: "Playback position"
                 onPressedChanged: { root.scrubbing = pressed; root.revealControls() }
                 onMoved: Player.seek(value)
+                ToolTip.visible: pressed
+                ToolTip.text: "Seek to " + root.time(value)
                 background: Rectangle {
                     x: seekControl.leftPadding; y: seekControl.topPadding + seekControl.availableHeight / 2 - height / 2
                     width: seekControl.availableWidth; height: seekControl.hovered || seekControl.pressed ? 6 : 4; radius: height / 2
@@ -174,7 +181,19 @@ Rectangle {
                     color: "white"; font.pixelSize: 12; Layout.leftMargin: 5
                 }
                 Item { Layout.fillWidth: true }
-                PlayerIconButton { iconName: "next"; tooltip: "Next episode"; onClicked: Player.nextEpisode() }
+                Button {
+                    visible: !root.compact; implicitWidth: 132; implicitHeight: 40; hoverEnabled: true
+                    Accessible.name: "Play next episode"
+                    contentItem: Row {
+                        anchors.centerIn: parent; spacing: 8
+                        Image { source: Qt.resolvedUrl("../../resources/icons/player-next.svg"); sourceSize.width: 20; sourceSize.height: 20; width: 20; height: 20 }
+                        Text { text: "Next episode"; color: "white"; font.pixelSize: 12; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
+                    }
+                    background: Rectangle { radius: 20; color: parent.down ? "#40FFFFFF" : parent.hovered || parent.activeFocus ? "#2BFFFFFF" : "transparent"; border.color: "#5CFFFFFF" }
+                    onClicked: Player.nextEpisode()
+                    ToolTip.visible: hovered; ToolTip.text: "Next episode (N)"; ToolTip.delay: 500
+                }
+                PlayerIconButton { visible: root.compact; iconName: "next"; tooltip: "Next episode (N)"; onClicked: Player.nextEpisode() }
                 Button {
                     implicitWidth: 62; implicitHeight: 38; hoverEnabled: true
                     Accessible.name: "Volume booster"
@@ -226,6 +245,7 @@ Rectangle {
         width: 230; height: Math.min(310, 58 + Player.captions.length * 43)
         modal: false; focus: true; padding: 8
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onClosed: root.revealControls()
         background: Rectangle { color: "#F21A1A1E"; radius: 12; border.color: "#4AFFFFFF" }
         contentItem: Column {
             Button {
@@ -249,6 +269,7 @@ Rectangle {
         x: Math.max(18, root.width - width - 70); y: Math.max(18, root.height - bottomShade.height - height + 18)
         width: 284; height: 312; modal: false; focus: true; padding: 16
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onClosed: root.revealControls()
         background: Rectangle { color: "#F21A1A1E"; radius: 12; border.color: "#4AFFFFFF" }
         contentItem: ColumnLayout {
             spacing: 10
@@ -288,6 +309,7 @@ Rectangle {
     Shortcut { sequence: "Down"; onActivated: { Player.adjustVolume(-0.05); root.revealControls() } }
     Shortcut { sequence: "M"; onActivated: { Player.toggleMuted(); root.revealControls() } }
     Shortcut { sequence: "C"; onActivated: { Player.captionsEnabled = !Player.captionsEnabled; root.revealControls() } }
+    Shortcut { sequence: "N"; onActivated: { Player.nextEpisode(); root.revealControls() } }
     Shortcut { sequence: "F"; onActivated: root.toggleFullscreenRequested() }
     Shortcut { sequence: "Escape"; onActivated: root.escapeRequested() }
 

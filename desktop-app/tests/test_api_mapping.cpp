@@ -113,6 +113,27 @@ private slots:
     QCOMPARE(episodes.first().toMap().value(QStringLiteral("title")).toString(), QStringLiteral("Enter: Naruto Uzumaki!"));
     QCOMPARE(episodes.first().toMap().value(QStringLiteral("id")).toString(), QStringLiteral("20::ep=1"));
   }
+
+  void infersLongRunningEpisodeCountFromListingPagination() {
+    const auto html = QStringLiteral(
+      "<div class=\"pagination ac\">"
+      "<a class=\"link current\" href=\"/anime/21/One_Piece/episode?offset=0\">1 - 100</a>"
+      "<a class=\"link\" href=\"/anime/21/One_Piece/episode?offset=100\">101 - 200</a>"
+      "<span class=\"skip\">&gt;</span>"
+      "<a class=\"link\" href=\"/anime/21/One_Piece/episode?offset=1100\">1101 - 1174</a>"
+      "</div>"
+      "<tr class=\"episode-list-data\"><td class=\"episode-number\" data-raw=\"100\">100</td>"
+      "<td class=\"episode-title\"><a href=\"/anime/21/One_Piece/episode/100\">Episode title</a></td></tr>");
+    QCOMPARE(ProviderClient::parseEpisodeCountHtml(html), 1174);
+    QCOMPARE(ProviderClient::parseEpisodeCountHtml(html, 1200), 1200);
+  }
+
+  void infersEpisodeCountWithoutPagination() {
+    const auto html = QStringLiteral(
+      "<tr class=\"episode-list-data\"><td class=\"episode-number nowrap\" data-raw=\"7\">7</td>"
+      "<td class=\"episode-title\"><a href=\"/anime/1/Show/episode/7\">Finale</a></td></tr>");
+    QCOMPARE(ProviderClient::parseEpisodeCountHtml(html), 7);
+  }
 };
 
 QTEST_GUILESS_MAIN(ApiMappingTest)

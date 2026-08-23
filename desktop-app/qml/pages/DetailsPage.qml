@@ -6,14 +6,24 @@ import AniCloud
 Flickable {
     id: root
     property string animeId: ""
-    property int episodeLimit: 12
+    property int episodeLimit: 24
     property string shareNotice: ""
+    readonly property var matchingEpisodes: {
+        const needle = episodeSearch.text.trim().toLowerCase()
+        if (!needle.length) return Provider.episodes
+        return Provider.episodes.filter(item => {
+            const number = String(item.number || "")
+            const title = String(item.episodeName || item.title || "").toLowerCase()
+            const alternative = String(item.alternativeTitle || "").toLowerCase()
+            return number === needle || title.includes(needle) || alternative.includes(needle)
+        })
+    }
     contentWidth: width
     contentHeight: content.implicitHeight + 40
     clip: true
     ScrollBar.vertical: ScrollBar {}
 
-    onAnimeIdChanged: if (animeId.length > 0) { episodeLimit = 12; Provider.loadDetails(animeId) }
+    onAnimeIdChanged: if (animeId.length > 0) { episodeLimit = 24; Provider.loadDetails(animeId) }
 
     ColumnLayout {
         id: content; width: root.width; spacing: 24
@@ -50,27 +60,62 @@ Flickable {
             Layout.fillWidth: true; Layout.leftMargin: 32; Layout.rightMargin: 32; spacing: 14
             RowLayout {
                 Layout.fillWidth: true
-                Text { text: "Episodes"; color: Theme.text; font.pixelSize: 22; font.weight: Font.Bold; Layout.fillWidth: true }
+                ColumnLayout {
+                    Layout.fillWidth: true; spacing: 2
+                    Text { text: "Episodes"; color: Theme.text; font.pixelSize: 22; font.weight: Font.Bold }
+                    Text {
+                        text: Provider.episodes.length > 0 ? Provider.episodes.length + " episodes available" : "Finding available episodes…"
+                        color: Theme.muted; font.pixelSize: 12
+                    }
+                }
                 TextField {
-                    id: episodeSearch; placeholderText: "Episode number"; inputMethodHints: Qt.ImhDigitsOnly; color: Theme.text; implicitWidth: 170
+                    id: episodeSearch; placeholderText: "Episode number or title"; color: Theme.text; implicitWidth: 240
+                    Accessible.name: "Search episodes by number or title"
+                    onTextChanged: root.episodeLimit = 24
                     background: Rectangle { color: Theme.surface; radius: Theme.radius; border.color: Theme.border }
                 }
             }
             Repeater {
-                model: Provider.episodes.filter(item => !episodeSearch.text.length || String(item.number) === episodeSearch.text).slice(0, root.episodeLimit)
+                model: root.matchingEpisodes.slice(0, root.episodeLimit)
                 delegate: Rectangle {
                     required property var modelData
-                    Layout.fillWidth: true; Layout.preferredHeight: 64; color: Theme.surface; radius: Theme.radius
+                    readonly property string primaryTitle: modelData.episodeName || modelData.title || ("Episode " + modelData.number)
+                    readonly property string secondaryTitle: modelData.alternativeTitle && modelData.alternativeTitle !== primaryTitle ? modelData.alternativeTitle : ""
+                    Layout.fillWidth: true; Layout.preferredHeight: secondaryTitle.length > 0 ? 82 : 72
+                    color: episodeHover.hovered ? Theme.raised : Theme.surface; radius: Theme.radius
+                    border.width: episodeHover.hovered ? 1 : 0; border.color: Theme.border
+                    HoverHandler { id: episodeHover }
                     RowLayout {
                         anchors.fill: parent; anchors.leftMargin: 18; anchors.rightMargin: 18
-                        Text { text: "EP " + modelData.number; color: Theme.red; font.bold: true; Layout.preferredWidth: 65 }
-                        Text { text: modelData.title || ("Episode " + modelData.number); color: Theme.text; elide: Text.ElideRight; Layout.fillWidth: true }
+                        Rectangle {
+                            Layout.preferredWidth: 46; Layout.preferredHeight: 38; radius: 19; color: "#26E50914"
+                            Text { anchors.centerIn: parent; text: modelData.number; color: Theme.red; font.bold: true; font.pixelSize: 13 }
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true; spacing: 3
+                            Text { text: primaryTitle; color: Theme.text; font.pixelSize: 14; font.weight: Font.DemiBold; elide: Text.ElideRight; Layout.fillWidth: true }
+                            Text { visible: secondaryTitle.length > 0; text: secondaryTitle; color: Theme.muted; font.pixelSize: 12; elide: Text.ElideRight; Layout.fillWidth: true }
+                        }
                         AppButton { text: "Play"; compact: true; onClicked: Player.open(Object.assign({}, modelData, { animeId: root.animeId, animeName: Provider.details.title, animeImage: Provider.details.poster, audioMode: Runtime.audioPreference })) }
                         AppButton { text: "Download"; compact: true; secondary: true; enabled: Account.authenticated; onClicked: Downloads.enqueueEpisode(Object.assign({}, modelData, { animeId: root.animeId, animeName: Provider.details.title, animeImage: Provider.details.poster, audioMode: Runtime.audioPreference }), Runtime.downloadQuality) }
                     }
                 }
             }
-            AppButton { visible: root.episodeLimit < Provider.episodes.length; text: "Load 12 more"; secondary: true; Layout.alignment: Qt.AlignHCenter; onClicked: root.episodeLimit += 12 }
+            Text {
+                visible: root.matchingEpisodes.length > 0
+                text: "Showing " + Math.min(root.episodeLimit, root.matchingEpisodes.length) + " of " + root.matchingEpisodes.length
+                color: Theme.muted; font.pixelSize: 12; Layout.alignment: Qt.AlignHCenter
+            }
+            AppButton {
+                visible: root.episodeLimit < root.matchingEpisodes.length
+                text: "Load 24 more"; secondary: true; Layout.alignment: Qt.AlignHCenter
+                onClicked: root.episodeLimit += 24
+            }
+            EmptyState {
+                visible: episodeSearch.text.length > 0 && root.matchingEpisodes.length === 0
+                Layout.fillWidth: true; Layout.preferredHeight: 180
+                title: "No matching episode"; message: "Try another episode number or title."; symbol: "?"
+            }
             PosterRail { title: "You may also like"; model: Provider.recommendations; Layout.fillWidth: true; onActivated: anime => Runtime.route = "details/" + anime.id }
         }
     }
