@@ -19,6 +19,7 @@ Flickable {
         id: content
         width: root.width
         spacing: 28
+        visible: root.hero.length > 0 || !Provider.loading
 
         Rectangle {
             Layout.fillWidth: true; Layout.preferredHeight: Math.max(370, root.height * 0.58)
@@ -59,6 +60,6 @@ Flickable {
         }
     }
 
-    LoadingSkeleton { anchors.centerIn: parent; width: Math.min(760, parent.width - 64); rows: 4; active: Provider.loading && Provider.popular.length === 0; z: 5 }
+    LoadingSkeleton { anchors.fill: parent; coverPage: true; rows: 4; active: Provider.loading && Provider.popular.length === 0; message: "Loading your home feed…"; z: 5 }
     EmptyState { anchors.centerIn: parent; visible: !Provider.loading && root.hero.length === 0 && Provider.error.length > 0; title: "Home is unavailable"; message: Provider.error; symbol: "!" }
 }

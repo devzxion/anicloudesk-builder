@@ -2,9 +2,13 @@
 
 #include "ApiClient.h"
 #include "HlsGateway.h"
+#include "HlsTools.h"
 
+#include <QFile>
 #include <QFileInfo>
 #include <QMediaMetaData>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QSettings>
 #include <QUrl>
 
@@ -20,6 +24,7 @@ PlayerController::PlayerController(ProviderClient *provider, AccountClient *acco
       m_lastProgressPosition = position;
       m_bufferRetries = 0;
     }
+    updateSubtitleText(position);
     emit positionChanged();
   });
   connect(&m_player, &QMediaPlayer::durationChanged, this, &PlayerController::durationChanged);
@@ -107,11 +112,18 @@ void PlayerController::open(const QVariantMap &episode, qint64 resumeMillisecond
   m_sessionId.clear();
   m_stream.clear();
   m_captions.clear();
+  cancelCaptionRequest();
+  m_selectedCaptionIndex = -1;
+  m_subtitleCues.clear();
+  m_subtitleText.clear();
+  setCaptionStatus(QStringLiteral("off"));
   emit captionsChanged();
   m_current = episode;
   if (!m_current.contains(QStringLiteral("episodeNumber"))) m_current.insert(QStringLiteral("episodeNumber"), episode.value(QStringLiteral("number")));
   if (!m_current.contains(QStringLiteral("episodeName"))) m_current.insert(QStringLiteral("episodeName"), episode.value(QStringLiteral("title"), QStringLiteral("Episode %1").arg(episode.value(QStringLiteral("number")).toInt())));
-  m_server = episode.value(QStringLiteral("server"), QStringLiteral("hd-1")).toString();
+  m_server = episode.value(QStringLiteral("server"),
+                           QSettings().value(QStringLiteral("playback/server"), QStringLiteral("hd-2"))).toString();
+  if (m_server != QStringLiteral("hd-1")) m_server = QStringLiteral("hd-2");
   m_audioMode = episode.value(QStringLiteral("audioMode"), QStringLiteral("sub")).toString();
   m_restorePosition = resumeMilliseconds;
   m_restorePlaying = true;
@@ -132,6 +144,8 @@ void PlayerController::openOffline(const QVariantMap &download) {
   m_restoreCaptionIndex = m_player.activeSubtitleTrack();
   saveProgress();
   m_player.stop();
+  cancelCaptionRequest();
+  m_subtitleCues.clear(); m_subtitleText.clear(); m_selectedCaptionIndex = -1;
   if (!m_sessionId.isEmpty()) m_gateway->closeSession(m_sessionId);
   m_sessionId.clear();
   m_current = download; m_stream = download;
@@ -141,6 +155,7 @@ void PlayerController::openOffline(const QVariantMap &download) {
   m_restorePosition = download.value(QStringLiteral("positionMilliseconds")).toLongLong();
   m_restorePlaying = true; m_bufferRetries = 0; m_lastProgressPosition = 0;
   emit captionsChanged(); emit currentChanged(); setError({}); setState(QStringLiteral("loading"));
+  if (m_captionsEnabled && !m_captions.isEmpty()) loadCaption(0);
   m_player.setSource(QUrl::fromLocalFile(path));
   m_player.play();
 }
@@ -158,6 +173,11 @@ void PlayerController::resolve(bool preserveState) {
 void PlayerController::applyStream(int generation, const QVariantMap &stream) {
   if (generation != m_generation) return;
   m_stream = stream;
+  const auto resolvedServer = stream.value(QStringLiteral("server")).toString();
+  if (resolvedServer == QStringLiteral("hd-1") || resolvedServer == QStringLiteral("hd-2")) {
+    m_server = resolvedServer;
+    m_current.insert(QStringLiteral("server"), resolvedServer);
+  }
   if (m_quality != QStringLiteral("auto")) {
     for (const auto &alternateValue : stream.value(QStringLiteral("alternates")).toList()) {
       const auto alternate = alternateValue.toMap();
@@ -168,6 +188,15 @@ void PlayerController::applyStream(int generation, const QVariantMap &stream) {
     }
   }
   m_captions = m_stream.value(QStringLiteral("subtitles")).toList(); emit captionsChanged(); emit currentChanged();
+  if (m_captionsEnabled && !m_captions.isEmpty())
+    loadCaption(qBound(0, m_selectedCaptionIndex < 0 ? 0 : m_selectedCaptionIndex,
+                       static_cast<int>(m_captions.size()) - 1));
+  else {
+    m_selectedCaptionIndex = -1;
+    m_subtitleCues.clear();
+    m_subtitleText.clear();
+    setCaptionStatus(QStringLiteral("off"));
+  }
   loadStream(m_stream);
 }
 
@@ -197,6 +226,7 @@ void PlayerController::failOrFallback(const QString &message) {
   if (!m_triedSecondaryServer) {
     m_triedSecondaryServer = true;
     m_server = m_server == QStringLiteral("hd-2") ? QStringLiteral("hd-1") : QStringLiteral("hd-2");
+    m_current.insert(QStringLiteral("server"), m_server); emit currentChanged();
     if (m_restorePosition <= 0) m_restorePosition = position();
     m_restoreSpeed = speed(); m_restoreCaptionIndex = m_player.activeSubtitleTrack();
     resolve(false); return;
@@ -248,6 +278,8 @@ void PlayerController::setCaptionsEnabled(bool enabled) {
   m_captionsEnabled = enabled;
   if (!enabled) {
     m_player.setActiveSubtitleTrack(-1);
+    if (!m_subtitleText.isEmpty()) m_subtitleText.clear();
+    setCaptionStatus(QStringLiteral("off"));
   } else if (!m_player.subtitleTracks().isEmpty()) {
     const auto preferred = m_restoreCaptionIndex >= 0
       ? qMin(m_restoreCaptionIndex, m_player.subtitleTracks().size() - 1)
@@ -255,22 +287,151 @@ void PlayerController::setCaptionsEnabled(bool enabled) {
     m_player.setActiveSubtitleTrack(preferred);
     m_restoreCaptionIndex = -1;
   }
+  if (enabled) {
+    if (m_subtitleCues.isEmpty() && !m_captions.isEmpty())
+      loadCaption(m_selectedCaptionIndex < 0 ? 0 : m_selectedCaptionIndex);
+    else {
+      setCaptionStatus(m_subtitleCues.isEmpty() ? QStringLiteral("loading") : QStringLiteral("ready"));
+      updateSubtitleText(position());
+    }
+  }
   if (changed) emit captionsChanged();
 }
 
 void PlayerController::selectCaption(int index) {
   if (index >= 0 && index < m_captions.size()) {
     m_captionsEnabled = true;
+    m_selectedCaptionIndex = index;
     m_restoreCaptionIndex = index;
     if (index < m_player.subtitleTracks().size()) {
       m_player.setActiveSubtitleTrack(index);
       m_restoreCaptionIndex = -1;
     }
+    loadCaption(index);
   } else {
     m_captionsEnabled = false;
     m_restoreCaptionIndex = -1;
+    m_selectedCaptionIndex = -1;
+    cancelCaptionRequest();
+    m_subtitleCues.clear();
+    m_subtitleText.clear();
+    setCaptionStatus(QStringLiteral("off"));
     m_player.setActiveSubtitleTrack(-1);
   }
+  emit captionsChanged();
+}
+
+void PlayerController::setCaptionStatus(const QString &status) {
+  if (m_captionStatus == status) return;
+  m_captionStatus = status;
+  emit captionsChanged();
+}
+
+void PlayerController::cancelCaptionRequest() {
+  ++m_captionGeneration;
+  if (m_subtitleReply) {
+    QObject::disconnect(m_subtitleReply, nullptr, this, nullptr);
+    m_subtitleReply->abort();
+    m_subtitleReply->deleteLater();
+    m_subtitleReply.clear();
+  }
+  m_captionQueue.clear();
+  m_captionVisited.clear();
+  m_captionDocument.clear();
+}
+
+void PlayerController::loadCaption(int index) {
+  cancelCaptionRequest();
+  m_subtitleCues.clear();
+  if (!m_subtitleText.isEmpty()) m_subtitleText.clear();
+  if (!m_captionsEnabled || index < 0 || index >= m_captions.size()) {
+    setCaptionStatus(QStringLiteral("off"));
+    return;
+  }
+  m_selectedCaptionIndex = index;
+  const auto track = m_captions.at(index).toMap();
+  QUrl url;
+  const auto localPath = track.value(QStringLiteral("localPath")).toString();
+  const auto rootPath = m_current.value(QStringLiteral("rootPath")).toString();
+  if (!localPath.isEmpty() && !rootPath.isEmpty())
+    url = QUrl::fromLocalFile(QFileInfo(rootPath + QLatin1Char('/') + localPath).absoluteFilePath());
+  else
+    url = QUrl(track.value(QStringLiteral("url"), track.value(QStringLiteral("file"))).toString());
+  if (!url.isValid() || url.isEmpty()) {
+    setCaptionStatus(QStringLiteral("error"));
+    return;
+  }
+  setCaptionStatus(QStringLiteral("loading"));
+  m_captionQueue.append(url);
+  fetchNextCaptionResource(m_captionGeneration);
+}
+
+void PlayerController::fetchNextCaptionResource(int generation) {
+  if (generation != m_captionGeneration) return;
+  if (m_captionQueue.isEmpty()) {
+    m_subtitleCues = SubtitleTools::parse(m_captionDocument);
+    setCaptionStatus(m_subtitleCues.isEmpty() ? QStringLiteral("error") : QStringLiteral("ready"));
+    updateSubtitleText(position());
+    return;
+  }
+  const auto url = m_captionQueue.takeFirst();
+  const auto key = url.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment).toString(QUrl::FullyEncoded);
+  if (m_captionVisited.contains(key)) { fetchNextCaptionResource(generation); return; }
+  m_captionVisited.insert(key);
+  if (url.isLocalFile()) {
+    QTimer::singleShot(0, this, [this, url, generation] {
+      if (generation != m_captionGeneration) return;
+      QFile file(url.toLocalFile());
+      if (!file.open(QIODevice::ReadOnly)) { setCaptionStatus(QStringLiteral("error")); return; }
+      handleCaptionResource(file.readAll(), url, generation);
+    });
+    return;
+  }
+
+  QNetworkRequest request(url);
+  request.setTransferTimeout(20'000);
+  request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+  const auto headers = m_stream.value(QStringLiteral("headers")).toMap();
+  for (auto it = headers.cbegin(); it != headers.cend(); ++it)
+    request.setRawHeader(it.key().toUtf8(), it.value().toString().toUtf8());
+  const auto referer = m_stream.value(QStringLiteral("referer")).toString();
+  if (!referer.isEmpty()) request.setRawHeader(QByteArrayLiteral("Referer"), referer.toUtf8());
+  request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("text/vtt,text/plain,application/vnd.apple.mpegurl,*/*"));
+  auto *reply = m_subtitleNetwork.get(request);
+  m_subtitleReply = reply;
+  connect(reply, &QNetworkReply::finished, this, [this, reply, generation] {
+    if (generation != m_captionGeneration) { reply->deleteLater(); return; }
+    m_subtitleReply.clear();
+    const auto body = reply->readAll();
+    const auto finalUrl = reply->url();
+    const auto ok = reply->error() == QNetworkReply::NoError && !body.isEmpty();
+    reply->deleteLater();
+    if (!ok) { setCaptionStatus(QStringLiteral("error")); return; }
+    handleCaptionResource(body, finalUrl, generation);
+  });
+}
+
+void PlayerController::handleCaptionResource(const QByteArray &body, const QUrl &url, int generation) {
+  if (generation != m_captionGeneration) return;
+  if (body.trimmed().startsWith(QByteArrayLiteral("#EXTM3U"))) {
+    const auto resources = HlsTools::resources(body, url);
+    QList<QUrl> nested;
+    for (const auto &resource : resources) {
+      if (resource.kind == QStringLiteral("segment") || resource.kind == QStringLiteral("playlist"))
+        nested.append(resource.url);
+    }
+    for (auto it = nested.crbegin(); it != nested.crend(); ++it) m_captionQueue.prepend(*it);
+  } else {
+    m_captionDocument.append(body);
+    m_captionDocument.append('\n');
+  }
+  fetchNextCaptionResource(generation);
+}
+
+void PlayerController::updateSubtitleText(qint64 position) {
+  const auto text = m_captionsEnabled ? SubtitleTools::textAt(m_subtitleCues, position) : QString{};
+  if (text == m_subtitleText) return;
+  m_subtitleText = text;
   emit captionsChanged();
 }
 
@@ -281,7 +442,12 @@ void PlayerController::refreshTracks() {
   m_restoreCaptionIndex = -1;
 }
 
-void PlayerController::switchServer(const QString &server) { if (server == m_server) return; m_server = server; m_current.insert(QStringLiteral("server"), server); emit currentChanged(); m_triedSecondaryServer = false; resolve(true); }
+void PlayerController::switchServer(const QString &server) {
+  const auto normalized = server == QStringLiteral("hd-1") ? QStringLiteral("hd-1") : QStringLiteral("hd-2");
+  QSettings().setValue(QStringLiteral("playback/server"), normalized);
+  if (normalized == m_server) return;
+  m_server = normalized; m_current.insert(QStringLiteral("server"), normalized); emit currentChanged(); m_triedSecondaryServer = false; resolve(true);
+}
 void PlayerController::switchAudio(const QString &audioMode) { if (audioMode == m_audioMode) return; m_audioMode = audioMode; m_current.insert(QStringLiteral("audioMode"), audioMode); emit currentChanged(); m_triedSecondaryServer = false; resolve(true); }
 void PlayerController::retry() { m_triedSecondaryServer = false; resolve(m_state != QStringLiteral("error")); }
 void PlayerController::skipIntro() { if (introEnd() > 0) seek(introEnd()); }
@@ -303,6 +469,7 @@ void PlayerController::close() {
   saveProgress(); m_player.stop(); m_player.setSource(QUrl{});
   if (!m_sessionId.isEmpty()) m_gateway->closeSession(m_sessionId);
   m_sessionId.clear(); m_current.clear(); m_stream.clear(); m_captions.clear();
+  cancelCaptionRequest(); m_subtitleCues.clear(); m_subtitleText.clear(); m_selectedCaptionIndex = -1; setCaptionStatus(QStringLiteral("off"));
   m_pendingFailure.clear(); m_failureScheduled = false;
   setError({}); setState(QStringLiteral("idle")); emit captionsChanged(); emit currentChanged();
 }

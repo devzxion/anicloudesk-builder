@@ -15,6 +15,7 @@ class QNetworkReply;
 class DownloadManager final : public QObject {
   Q_OBJECT
   Q_PROPERTY(QVariantList items READ items NOTIFY itemsChanged)
+  Q_PROPERTY(QVariantList groups READ groups NOTIFY itemsChanged)
   Q_PROPERTY(QString error READ error NOTIFY errorChanged)
   Q_PROPERTY(QString storageRoot READ storageRoot NOTIFY storageRootChanged)
   Q_PROPERTY(bool movingStorage READ movingStorage NOTIFY movingStorageChanged)
@@ -25,6 +26,7 @@ public:
   ~DownloadManager() override;
 
   [[nodiscard]] QVariantList items() const { return m_items; }
+  [[nodiscard]] QVariantList groups() const { return m_groups; }
   [[nodiscard]] QString error() const { return m_error; }
   [[nodiscard]] QString storageRoot() const { return m_storageRoot; }
   [[nodiscard]] bool movingStorage() const { return m_movingStorage; }
@@ -33,6 +35,7 @@ public:
   Q_INVOKABLE void reload();
   Q_INVOKABLE QString enqueue(const QVariantMap &episode, const QVariantMap &stream, int preferredHeight = 1080);
   Q_INVOKABLE void enqueueEpisode(const QVariantMap &episode, int preferredHeight = 1080);
+  Q_INVOKABLE QVariantMap episodeStatus(const QString &animeId, const QString &episodeId) const;
   Q_INVOKABLE void pause(const QString &id);
   Q_INVOKABLE void resume(const QString &id);
   Q_INVOKABLE void retry(const QString &id);
@@ -75,6 +78,7 @@ private:
   QHash<QString, QString> m_publicAddresses;
   QHash<QString, Job *> m_jobs;
   QVariantList m_items;
+  QVariantList m_groups;
   QString m_error;
   QString m_storageRoot;
   bool m_movingStorage = false;

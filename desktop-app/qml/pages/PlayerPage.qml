@@ -247,6 +247,7 @@ Rectangle {
                 }
                 PlayerIconButton {
                     iconName: "captions"; tooltip: "Captions (C)"; enabled: Player.captions.length > 0
+                    emphasized: Player.captionsEnabled && Player.selectedCaptionIndex >= 0
                     onClicked: { root.revealControls(); captionsPopup.open() }
                 }
                 AppButton {
@@ -268,7 +269,7 @@ Rectangle {
 
     Rectangle {
         id: subtitleBackdrop
-        readonly property string cue: String(videoOutput.videoSink.subtitleText || "").trim()
+        readonly property string cue: String(Player.subtitleText || videoOutput.videoSink.subtitleText || "").trim()
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: !root.uiLocked && root.controlsVisible ? 150 : 42
@@ -331,12 +332,19 @@ Rectangle {
     Popup {
         id: captionsPopup
         x: Math.max(18, root.width - width - 116); y: Math.max(18, root.height - bottomShade.height - height + 18)
-        width: 230; height: Math.min(310, 58 + Player.captions.length * 43)
+        width: 250; height: Math.min(340, 94 + Player.captions.length * 43)
         modal: false; focus: true; padding: 8
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         onClosed: root.revealControls()
         background: Rectangle { color: "#F21A1A1E"; radius: 12; border.color: "#4AFFFFFF" }
         contentItem: Column {
+            Text {
+                width: parent.width; height: 34
+                text: Player.captionStatus === "loading" ? "Loading captions…"
+                      : Player.captionStatus === "error" ? "Captions could not be loaded" : "Captions"
+                color: Player.captionStatus === "error" ? Theme.red : "#BDBDC4"
+                font.pixelSize: 12; verticalAlignment: Text.AlignVCenter; leftPadding: 10
+            }
             Button {
                 width: parent.width; height: 42; text: "Captions off"; flat: true
                 palette.buttonText: "white"; onClicked: { Player.captionsEnabled = false; captionsPopup.close() }
@@ -346,7 +354,7 @@ Rectangle {
                 delegate: Button {
                     required property var modelData
                     width: parent.width; height: 42; flat: true
-                    text: modelData.label || ("Captions " + (index + 1)); palette.buttonText: "white"
+                    text: (Player.captionsEnabled && Player.selectedCaptionIndex === index ? "✓  " : "") + (modelData.label || ("Captions " + (index + 1))); palette.buttonText: "white"
                     onClicked: { Player.selectCaption(index); captionsPopup.close() }
                 }
             }

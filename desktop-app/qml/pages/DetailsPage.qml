@@ -18,6 +18,22 @@ Flickable {
             return number === needle || title.includes(needle) || alternative.includes(needle)
         })
     }
+    function downloadFor(episode) {
+        // Referencing these properties keeps every delegate in sync as jobs move
+        // from resolving to downloading to completed.
+        const records = Downloads.items
+        const resolving = Downloads.preparing
+        return Downloads.episodeStatus(root.animeId, String(episode.episodeId || episode.id || ""))
+    }
+    function downloadLabel(record) {
+        if (!record || !record.state) return "Download"
+        if (record.state === "completed") return "Play offline"
+        if (record.state === "downloading") return Math.round(Number(record.progress || 0) * 100) + "% downloaded"
+        if (record.state === "preparing" || record.state === "queued") return "Preparing…"
+        if (record.state === "validating") return "Validating…"
+        if (["paused", "failed", "cancelled"].indexOf(record.state) >= 0) return "Resume"
+        return "Downloading…"
+    }
     contentWidth: width
     contentHeight: content.implicitHeight + 40
     clip: true
@@ -27,6 +43,7 @@ Flickable {
 
     ColumnLayout {
         id: content; width: root.width; spacing: 24
+        visible: Provider.details.title
         Rectangle {
             Layout.fillWidth: true; Layout.preferredHeight: 410; color: Theme.surface; clip: true
             Image { anchors.fill: parent; source: Provider.details.banner || Provider.details.poster || ""; fillMode: Image.PreserveAspectCrop; opacity: 0.48; asynchronous: true }
@@ -81,6 +98,7 @@ Flickable {
                     required property var modelData
                     readonly property string primaryTitle: modelData.episodeName || modelData.title || ("Episode " + modelData.number)
                     readonly property string secondaryTitle: modelData.alternativeTitle && modelData.alternativeTitle !== primaryTitle ? modelData.alternativeTitle : ""
+                    readonly property var downloadRecord: root.downloadFor(modelData)
                     Layout.fillWidth: true; Layout.preferredHeight: secondaryTitle.length > 0 ? 82 : 72
                     color: episodeHover.hovered ? Theme.raised : Theme.surface; radius: Theme.radius
                     border.width: episodeHover.hovered ? 1 : 0; border.color: Theme.border
@@ -96,8 +114,21 @@ Flickable {
                             Text { text: primaryTitle; color: Theme.text; font.pixelSize: 14; font.weight: Font.DemiBold; elide: Text.ElideRight; Layout.fillWidth: true }
                             Text { visible: secondaryTitle.length > 0; text: secondaryTitle; color: Theme.muted; font.pixelSize: 12; elide: Text.ElideRight; Layout.fillWidth: true }
                         }
-                        AppButton { text: "Play"; compact: true; onClicked: Player.open(Object.assign({}, modelData, { animeId: root.animeId, animeName: Provider.details.title, animeImage: Provider.details.poster, audioMode: Runtime.audioPreference })) }
-                        AppButton { text: Downloads.preparing ? "Preparing…" : "Download"; compact: true; secondary: true; enabled: Account.authenticated && !Downloads.preparing; onClicked: Downloads.enqueueEpisode(Object.assign({}, modelData, { animeId: root.animeId, animeName: Provider.details.title, animeImage: Provider.details.poster, audioMode: Runtime.audioPreference }), Runtime.downloadQuality) }
+                        AppButton {
+                            text: "Play"; compact: true
+                            onClicked: Player.open(Object.assign({}, modelData, { animeId: root.animeId, animeName: Provider.details.title, animeImage: Provider.details.poster, audioMode: Runtime.audioPreference, server: Runtime.serverPreference }))
+                        }
+                        AppButton {
+                            text: root.downloadLabel(downloadRecord); compact: true
+                            secondary: downloadRecord.state !== "completed"
+                            enabled: Account.authenticated
+                            onClicked: {
+                                if (downloadRecord.state === "completed") Player.openOffline(downloadRecord)
+                                else if (["paused", "failed", "cancelled"].indexOf(downloadRecord.state) >= 0) Downloads.resume(downloadRecord.id)
+                                else if (["preparing", "queued", "downloading", "validating"].indexOf(downloadRecord.state) >= 0) Runtime.route = "downloads"
+                                else Downloads.enqueueEpisode(Object.assign({}, modelData, { animeId: root.animeId, animeName: Provider.details.title, animeImage: Provider.details.poster, audioMode: Runtime.audioPreference, server: Runtime.serverPreference }), Runtime.downloadQuality)
+                            }
+                        }
                     }
                 }
             }
@@ -120,7 +151,7 @@ Flickable {
             PosterRail { title: "You may also like"; model: Provider.recommendations; Layout.fillWidth: true; onActivated: anime => Runtime.route = "details/" + anime.id }
         }
     }
-    LoadingSkeleton { anchors.centerIn: parent; width: Math.min(760, parent.width - 64); rows: 4; active: Provider.loading && !Provider.details.title; z: 5 }
+    LoadingSkeleton { anchors.fill: parent; coverPage: true; rows: 4; active: Provider.loading && !Provider.details.title; message: "Loading anime details…"; z: 5 }
     EmptyState { anchors.centerIn: parent; visible: !Provider.loading && !Provider.details.title && Provider.error.length > 0; title: "Details unavailable"; message: Provider.error; symbol: "!" }
     Timer { id: shareNoticeTimer; interval: 2800; onTriggered: root.shareNotice = "" }
     Connections {

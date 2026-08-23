@@ -1,6 +1,6 @@
 # Releasing AniCloud Desktop
 
-Push `desktop-v4.0.7` or dispatch the Desktop Release workflow with that tag. Production builds intentionally fail unless the Ed25519 manifest key and public release token are present.
+Push `desktop-v4.0.8` or dispatch the Desktop Release workflow with that tag. Production builds intentionally fail unless the Ed25519 manifest key and public release token are present.
 
 Required GitHub Actions secrets:
 

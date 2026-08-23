@@ -21,6 +21,8 @@ private slots:
     QVERIFY(playerSource.contains("canSkipOutro"));
     QVERIFY(playerSource.contains("interval: 4000"));
     QVERIFY(playerSource.contains("videoOutput.videoSink.subtitleText"));
+    QVERIFY(playerSource.contains("Player.subtitleText"));
+    QVERIFY(playerSource.contains("Player.captionStatus"));
     QVERIFY(playerSource.contains("uiLocked"));
     QVERIFY(playerSource.contains("onDoubleClicked: root.unlockPlayerUi()"));
     QVERIFY(playerSource.contains("Double-click the lock to unlock"));
@@ -87,6 +89,36 @@ private slots:
     QVERIFY(source.contains("record.insert(QStringLiteral(\"episodeId\")"));
     QVERIFY(source.contains("record.insert(QStringLiteral(\"audioMode\")"));
     QVERIFY(source.contains("record.insert(QStringLiteral(\"server\")"));
+    QVERIFY(source.contains("ConcurrentResources = 6"));
+    QVERIFY(source.contains("m_groups"));
+    QVERIFY(source.contains("episodeStatus"));
+  }
+
+  void downloadAndDiscoverPagesExposeNativeOrganization() {
+    QFile downloads(QStringLiteral(ANICLOUD_SOURCE_DIR "/qml/pages/DownloadsPage.qml")); QVERIFY(downloads.open(QIODevice::ReadOnly));
+    QFile details(QStringLiteral(ANICLOUD_SOURCE_DIR "/qml/pages/DetailsPage.qml")); QVERIFY(details.open(QIODevice::ReadOnly));
+    QFile discover(QStringLiteral(ANICLOUD_SOURCE_DIR "/qml/pages/DiscoverPage.qml")); QVERIFY(discover.open(QIODevice::ReadOnly));
+    QFile card(QStringLiteral(ANICLOUD_SOURCE_DIR "/qml/components/AnimeCard.qml")); QVERIFY(card.open(QIODevice::ReadOnly));
+    const auto downloadSource = downloads.readAll();
+    const auto detailsSource = details.readAll();
+    const auto discoverSource = discover.readAll();
+    QVERIFY(downloadSource.contains("Downloads.groups"));
+    QVERIFY(downloadSource.contains("View episodes"));
+    QVERIFY(detailsSource.contains("Downloads.episodeStatus"));
+    QVERIFY(detailsSource.contains("Play offline"));
+    QVERIFY(discoverSource.contains("Provider.genres"));
+    QVERIFY(discoverSource.contains("Provider.themes"));
+    QVERIFY(discoverSource.contains("Provider.browseGenre"));
+    QVERIFY(card.readAll().contains("animeImage"));
+  }
+
+  void hd2IsTheDesktopDefaultServer() {
+    QFile runtime(QStringLiteral(ANICLOUD_SOURCE_DIR "/src/AppRuntime.cpp")); QVERIFY(runtime.open(QIODevice::ReadOnly));
+    QFile player(QStringLiteral(ANICLOUD_SOURCE_DIR "/src/PlayerController.h")); QVERIFY(player.open(QIODevice::ReadOnly));
+    const auto runtimeSource = runtime.readAll();
+    QVERIFY(runtimeSource.contains("playback/server"));
+    QVERIFY(runtimeSource.contains("QStringLiteral(\"hd-2\")"));
+    QVERIFY(player.readAll().contains("m_server = QStringLiteral(\"hd-2\")"));
   }
 
   void paletteIsCanonical() {

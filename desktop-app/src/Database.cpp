@@ -70,7 +70,7 @@ bool Database::migrate(QString *error) {
     QStringLiteral("CREATE TABLE IF NOT EXISTS local_history("
                    "anime_id TEXT NOT NULL, episode_id TEXT NOT NULL, anime_name TEXT NOT NULL, anime_image TEXT NOT NULL DEFAULT '',"
                    "episode_number INTEGER NOT NULL DEFAULT 0, episode_name TEXT NOT NULL, audio_mode TEXT NOT NULL DEFAULT 'sub',"
-                   "server TEXT NOT NULL DEFAULT 'hd-1', position_seconds INTEGER NOT NULL DEFAULT 0, duration_seconds INTEGER,"
+                   "server TEXT NOT NULL DEFAULT 'hd-2', position_seconds INTEGER NOT NULL DEFAULT 0, duration_seconds INTEGER,"
                    "episode_count INTEGER NOT NULL DEFAULT 0, watched_at INTEGER NOT NULL, PRIMARY KEY(anime_id, episode_id))"),
     QStringLiteral("CREATE TABLE IF NOT EXISTS downloads("
                    "id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, anime_id TEXT NOT NULL, anime_name TEXT NOT NULL, anime_image TEXT NOT NULL DEFAULT '',"
@@ -129,7 +129,7 @@ bool Database::saveLocalProgress(const QVariantMap &r, QString *error) {
   query.addBindValue(r.value(QStringLiteral("animeId"))); query.addBindValue(r.value(QStringLiteral("episodeId")));
   query.addBindValue(r.value(QStringLiteral("animeName"))); query.addBindValue(r.value(QStringLiteral("animeImage"), QStringLiteral("")));
   query.addBindValue(r.value(QStringLiteral("episodeNumber"), 0)); query.addBindValue(r.value(QStringLiteral("episodeName")));
-  query.addBindValue(r.value(QStringLiteral("audioMode"), QStringLiteral("sub"))); query.addBindValue(r.value(QStringLiteral("server"), QStringLiteral("hd-1")));
+  query.addBindValue(r.value(QStringLiteral("audioMode"), QStringLiteral("sub"))); query.addBindValue(r.value(QStringLiteral("server"), QStringLiteral("hd-2")));
   query.addBindValue(r.value(QStringLiteral("positionSeconds"))); query.addBindValue(r.value(QStringLiteral("durationSeconds")));
   query.addBindValue(r.value(QStringLiteral("episodeCount"), 0)); query.addBindValue(QDateTime::currentMSecsSinceEpoch());
   if (query.exec()) return true;

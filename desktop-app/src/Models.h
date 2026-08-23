@@ -77,7 +77,7 @@ struct SubtitleTrack {
 struct StreamDescriptor {
   QString episodeId;
   QString mediaUrl;
-  QString server = QStringLiteral("hd-1");
+  QString server = QStringLiteral("hd-2");
   QString audioMode = QStringLiteral("sub");
   QString referer;
   QVariantMap headers;

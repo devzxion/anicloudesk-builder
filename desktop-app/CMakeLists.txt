@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(AniCloudDesktop VERSION 4.0.7 LANGUAGES CXX)
+project(AniCloudDesktop VERSION 4.0.8 LANGUAGES CXX)
 
 if(WIN32)
   enable_language(RC)
@@ -80,6 +80,8 @@ qt_add_executable(AniCloud WIN32 MACOSX_BUNDLE
   src/HlsTools.cpp
   src/HlsGateway.h
   src/HlsGateway.cpp
+  src/SubtitleTools.h
+  src/SubtitleTools.cpp
   src/PlayerController.h
   src/PlayerController.cpp
   src/DownloadManager.h

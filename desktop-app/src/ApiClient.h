@@ -20,6 +20,8 @@ class ProviderClient final : public QObject {
   Q_PROPERTY(QVariantList popular READ popular NOTIFY homeChanged)
   Q_PROPERTY(QVariantList airing READ airing NOTIFY homeChanged)
   Q_PROPERTY(QVariantList searchResults READ searchResults NOTIFY searchChanged)
+  Q_PROPERTY(QVariantList genres READ genres NOTIFY taxonomyChanged)
+  Q_PROPERTY(QVariantList themes READ themes NOTIFY taxonomyChanged)
   Q_PROPERTY(QVariantMap details READ details NOTIFY detailsChanged)
   Q_PROPERTY(QVariantList episodes READ episodes NOTIFY detailsChanged)
   Q_PROPERTY(QVariantList recommendations READ recommendations NOTIFY detailsChanged)
@@ -37,6 +39,8 @@ public:
   [[nodiscard]] QVariantList popular() const { return m_popular; }
   [[nodiscard]] QVariantList airing() const { return m_airing; }
   [[nodiscard]] QVariantList searchResults() const { return m_searchResults; }
+  [[nodiscard]] QVariantList genres() const { return m_genres; }
+  [[nodiscard]] QVariantList themes() const { return m_themes; }
   [[nodiscard]] QVariantMap details() const { return m_details; }
   [[nodiscard]] QVariantList episodes() const { return m_episodes; }
   [[nodiscard]] QVariantList recommendations() const { return m_recommendations; }
@@ -47,11 +51,13 @@ public:
   Q_INVOKABLE void loadHome();
   Q_INVOKABLE void loadCategory(const QString &kind, int page = 1);
   Q_INVOKABLE void search(const QString &query, int page = 1);
+  Q_INVOKABLE void loadTaxonomy();
+  Q_INVOKABLE void browseGenre(int id, const QString &slug, int page = 1);
   Q_INVOKABLE void loadDetails(const QString &animeId);
   Q_INVOKABLE void loadEpisodes(const QString &animeId, int offset = 0, int limit = 12);
   Q_INVOKABLE void loadServers(const QString &episodeId);
   Q_INVOKABLE void resolveStream(int generation, const QString &episodeId,
-                                  const QString &server = QStringLiteral("hd-1"),
+                                  const QString &server = QStringLiteral("hd-2"),
                                   const QString &audioMode = QStringLiteral("sub"));
 
   // Pure DTO mapping seams used by native unit tests.
@@ -62,6 +68,7 @@ public:
   static QVariantList parseTopAnimeHtml(const QString &html, int limit = 20);
   static QVariantList parseSeasonAnimeHtml(const QString &html, int page = 1, int limit = 20);
   static QVariantList parseSearchHtml(const QString &html, int limit = 20);
+  static QVariantMap parseTaxonomyHtml(const QString &html);
   static QVariantList parseEpisodeNamesHtml(const QString &html, const QString &animeId);
   static int parseEpisodeCountHtml(const QString &html, int fallback = 0);
   static QString parseEpisodeListingUrlHtml(const QString &html, const QString &animeId);
@@ -73,6 +80,7 @@ signals:
   void errorChanged();
   void homeChanged();
   void searchChanged();
+  void taxonomyChanged();
   void detailsChanged();
   void serversChanged();
   void streamResolved(int generation, const QVariantMap &stream);
@@ -99,6 +107,8 @@ private:
   QVariantList m_popular;
   QVariantList m_airing;
   QVariantList m_searchResults;
+  QVariantList m_genres;
+  QVariantList m_themes;
   QVariantMap m_details;
   QVariantList m_episodes;
   QVariantList m_recommendations;

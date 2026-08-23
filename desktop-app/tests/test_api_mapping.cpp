@@ -82,6 +82,24 @@ private slots:
     QCOMPARE(search.first().toMap().value(QStringLiteral("episodes")).toInt(), 500);
   }
 
+  void parsesMalGenresAndThemesSeparately() {
+    const auto html = QStringLiteral(
+      "<div class=\"category-wrapper\"><div class=\"category-type\">Genres</div>"
+      "<input name=\"genre[]\" type=\"checkbox\" value=\"1\"><p>Action (5,010)</p>"
+      "<input name=\"genre[]\" type=\"checkbox\" value=\"10\"><p>Fantasy (6,252)</p></div>"
+      "<div class=\"category-wrapper\"><div class=\"category-type\">Themes</div>"
+      "<input name=\"genre[]\" type=\"checkbox\" value=\"50\"><p>Adult Cast (803)</p>"
+      "<input name=\"genre[]\" type=\"checkbox\" value=\"62\"><p>Isekai (512)</p></div>"
+      "<div class=\"category-wrapper\"><div class=\"category-type\">Demographics</div></div>");
+    const auto taxonomy = ProviderClient::parseTaxonomyHtml(html);
+    const auto genres = taxonomy.value(QStringLiteral("genres")).toList();
+    const auto themes = taxonomy.value(QStringLiteral("themes")).toList();
+    QCOMPARE(genres.size(), 2);
+    QCOMPARE(themes.size(), 2);
+    QCOMPARE(genres.first().toMap().value(QStringLiteral("label")).toString(), QStringLiteral("Action"));
+    QCOMPARE(themes.first().toMap().value(QStringLiteral("slug")).toString(), QStringLiteral("Adult_Cast"));
+  }
+
   void parsesBundledDetailsAndRecommendations() {
     const auto html = QStringLiteral(
       "<h1 class=\"title-name h1_bold_none\"><strong>Naruto</strong></h1>"

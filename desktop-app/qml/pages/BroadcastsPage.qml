@@ -23,5 +23,5 @@ Item {
         }
         EmptyState { visible: !Account.busy && list.count === 0; title: "No notifications"; message: "Service announcements and account notifications will appear here."; Layout.fillWidth: true; Layout.fillHeight: true }
     }
-    LoadingSkeleton { anchors.centerIn: parent; width: Math.min(720, parent.width - 64); rows: 4; active: Account.busy && list.count === 0; z: 5 }
+    LoadingSkeleton { anchors.fill: parent; coverPage: true; rows: 4; active: Account.busy && list.count === 0; message: "Loading notifications…"; z: 5 }
 }

@@ -125,6 +125,13 @@ QVariantMap providerCard(const AnimeIdentity &identity, const QString &poster, i
   };
 }
 
+QString taxonomySlug(QString label) {
+  label.remove(QRegularExpression(QStringLiteral("[()]")));
+  label.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9-]+")), QStringLiteral("_"));
+  label.remove(QRegularExpression(QStringLiteral("^_+|_+$")));
+  return label;
+}
+
 QUrl providerUrl(const QString &base, const QString &path,
                  const QList<QPair<QString, QString>> &parameters = {}) {
   QUrl url(base + path);
@@ -329,6 +336,45 @@ QVariantList ProviderClient::parseSearchHtml(const QString &html, int limit) {
                                textCells.at(2), QStringLiteral("N/A")));
   }
   return result;
+}
+
+QVariantMap ProviderClient::parseTaxonomyHtml(const QString &html) {
+  struct Marker { qsizetype start = 0; qsizetype end = 0; QString name; };
+  QList<Marker> markers;
+  auto categories = rx(QStringLiteral(
+    "<div\\b[^>]*class\\s*=\\s*[\\\"'][^\\\"']*category-type[^\\\"']*[\\\"'][^>]*>(.*?)</div>"))
+                      .globalMatch(html);
+  while (categories.hasNext()) {
+    const auto match = categories.next();
+    markers.append({match.capturedStart(), match.capturedEnd(), htmlText(match.captured(1))});
+  }
+
+  QVariantList genres;
+  QVariantList themes;
+  for (qsizetype markerIndex = 0; markerIndex < markers.size(); ++markerIndex) {
+    const auto &marker = markers.at(markerIndex);
+    if (marker.name.compare(QStringLiteral("Genres"), Qt::CaseInsensitive) != 0 &&
+        marker.name.compare(QStringLiteral("Themes"), Qt::CaseInsensitive) != 0) continue;
+    const auto end = markerIndex + 1 < markers.size() ? markers.at(markerIndex + 1).start : html.size();
+    const auto block = html.mid(marker.end, end - marker.end);
+    auto options = rx(QStringLiteral(
+      "<input\\b[^>]*name\\s*=\\s*[\\\"']genre\\[\\][\\\"'][^>]*value\\s*=\\s*[\\\"'](\\d+)[\\\"'][^>]*>\\s*<p>(.*?)</p>"))
+                     .globalMatch(block);
+    while (options.hasNext()) {
+      const auto option = options.next();
+      auto label = htmlText(option.captured(2));
+      label.remove(QRegularExpression(QStringLiteral("\\s*\\([\\d,]+\\)\\s*$")));
+      if (label.isEmpty()) continue;
+      const QVariantMap item{
+        {QStringLiteral("id"), option.captured(1).toInt()},
+        {QStringLiteral("label"), label},
+        {QStringLiteral("slug"), taxonomySlug(label)},
+      };
+      if (marker.name.compare(QStringLiteral("Genres"), Qt::CaseInsensitive) == 0) genres.append(item);
+      else themes.append(item);
+    }
+  }
+  return {{QStringLiteral("genres"), genres}, {QStringLiteral("themes"), themes}};
 }
 
 QVariantList ProviderClient::parseEpisodeNamesHtml(const QString &html, const QString &animeId) {
@@ -568,6 +614,7 @@ void ProviderClient::search(const QString &query, int page) {
     m_searchResults.clear(); m_searchHasMore = false; emit searchChanged(); return;
   }
   const auto currentPage = qMax(1, page);
+  if (currentPage == 1) { m_searchResults.clear(); m_searchHasMore = false; emit searchChanged(); }
   const auto url = providerUrl(MalBaseUrl, QStringLiteral("/anime.php"), {
     {QStringLiteral("q"), query.trimmed()},
     {QStringLiteral("cat"), QStringLiteral("anime")},
@@ -577,6 +624,34 @@ void ProviderClient::search(const QString &query, int page) {
     const auto items = parseSearchHtml(QString::fromUtf8(body), 20);
     if (currentPage <= 1) m_searchResults = items; else m_searchResults.append(items);
     m_searchHasMore = items.size() >= 20;
+    emit searchChanged();
+  });
+}
+
+void ProviderClient::loadTaxonomy() {
+  if (!m_genres.isEmpty() && !m_themes.isEmpty()) return;
+  getText(providerUrl(MalBaseUrl, QStringLiteral("/anime.php")), malHeaders(),
+          [this](const QByteArray &body, const QUrl &) {
+    const auto taxonomy = parseTaxonomyHtml(QString::fromUtf8(body));
+    m_genres = taxonomy.value(QStringLiteral("genres")).toList();
+    m_themes = taxonomy.value(QStringLiteral("themes")).toList();
+    emit taxonomyChanged();
+  }, {}, false, false);
+}
+
+void ProviderClient::browseGenre(int id, const QString &slug, int page) {
+  if (id <= 0) return;
+  const auto currentPage = qMax(1, page);
+  if (currentPage == 1) { m_searchResults.clear(); m_searchHasMore = false; emit searchChanged(); }
+  auto safeSlug = taxonomySlug(slug);
+  if (safeSlug.isEmpty()) safeSlug = QStringLiteral("Anime");
+  const auto url = providerUrl(MalBaseUrl,
+    QStringLiteral("/anime/genre/%1/%2").arg(id).arg(safeSlug),
+    {{QStringLiteral("page"), QString::number(currentPage)}});
+  getText(url, malHeaders(), [this, currentPage](const QByteArray &body, const QUrl &) {
+    const auto items = parseSeasonAnimeHtml(QString::fromUtf8(body), 1, 100);
+    if (currentPage <= 1) m_searchResults = items; else m_searchResults.append(items);
+    m_searchHasMore = items.size() >= 100;
     emit searchChanged();
   });
 }
@@ -703,6 +778,12 @@ QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &ep
   result.insert(QStringLiteral("audioMode"), audioMode);
   const auto referer = firstString(data, {"Referer", "referer", "referrer"});
   result.insert(QStringLiteral("referer"), referer);
+  const auto streamBase = QUrl(referer.isEmpty() ? MegaplayBaseUrl + QLatin1Char('/') : referer);
+  const auto absoluteStreamUrl = [&streamBase](const QString &value) {
+    if (value.trimmed().isEmpty()) return QString{};
+    const QUrl candidate(value);
+    return (candidate.isRelative() ? streamBase.resolved(candidate) : candidate).toString(QUrl::FullyEncoded);
+  };
   QVariantMap headers = data.value(QStringLiteral("headers")).toObject().toVariantMap();
   if (!referer.isEmpty()) headers.insert(QStringLiteral("Referer"), referer);
   const auto origin = firstString(data, {"Origin", "origin"});
@@ -717,7 +798,7 @@ QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &ep
   QString selected;
   for (const auto &sourceValue : sources) {
     const auto source = sourceValue.toObject();
-    const auto url = firstString(source, {"file", "url", "src"});
+    const auto url = absoluteStreamUrl(firstString(source, {"file", "url", "src"}));
     if (url.isEmpty()) continue;
     QVariantMap item = source.toVariantMap();
     item.insert(QStringLiteral("url"), url);
@@ -725,7 +806,7 @@ QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &ep
     const auto label = source.value(QStringLiteral("label")).toString().toLower();
     if (selected.isEmpty() || label.contains(QStringLiteral("auto"))) selected = url;
   }
-  if (selected.isEmpty()) selected = firstString(data, {"directFile", "file", "url", "link"});
+  if (selected.isEmpty()) selected = absoluteStreamUrl(firstString(data, {"directFile", "file", "url", "link"}));
   result.insert(QStringLiteral("mediaUrl"), selected);
   result.insert(QStringLiteral("alternates"), alternates);
 
@@ -734,7 +815,7 @@ QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &ep
     const auto track = trackValue.toObject();
     const auto kind = track.value(QStringLiteral("kind")).toString().toLower();
     if (!kind.isEmpty() && kind != QStringLiteral("captions") && kind != QStringLiteral("subtitles")) continue;
-    const auto url = firstString(track, {"file", "url", "src"});
+    const auto url = absoluteStreamUrl(firstString(track, {"file", "url", "src"}));
     if (url.isEmpty()) continue;
     QVariantMap item = track.toVariantMap();
     item.insert(QStringLiteral("url"), url);

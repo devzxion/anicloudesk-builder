@@ -57,7 +57,9 @@ struct DownloadManager::Job {
 };
 
 namespace {
-constexpr int ConcurrentResources = 3;
+// Six segment requests keeps HLS downloads quick without overwhelming a CDN or
+// starving playback/network work elsewhere in the app.
+constexpr int ConcurrentResources = 6;
 
 QByteArray hashFile(const QString &path) {
   QFile file(path); if (!file.open(QIODevice::ReadOnly)) return {};
@@ -117,7 +119,7 @@ void DownloadManager::setError(const QString &error) { if (m_error == error) ret
 void DownloadManager::reload() {
   const auto owner = m_account->user().value(QStringLiteral("id")).toString();
   if (owner.isEmpty()) {
-    m_items.clear(); emit itemsChanged(); return;
+    m_items.clear(); m_groups.clear(); emit itemsChanged(); return;
   }
   auto records = m_database->downloads(owner);
   bool recoveredInterruptedJob = false;
@@ -134,10 +136,82 @@ void DownloadManager::reload() {
     }
   }
   m_items = recoveredInterruptedJob ? m_database->downloads(owner) : records;
+  m_groups.clear();
+  QHash<QString, qsizetype> groupIndexes;
+  for (const auto &value : std::as_const(m_items)) {
+    const auto record = value.toMap();
+    auto groupKey = record.value(QStringLiteral("animeId")).toString();
+    if (groupKey.isEmpty()) groupKey = record.value(QStringLiteral("animeName")).toString();
+    qsizetype groupIndex = groupIndexes.value(groupKey, -1);
+    if (groupIndex < 0) {
+      groupIndex = m_groups.size();
+      groupIndexes.insert(groupKey, groupIndex);
+      m_groups.append(QVariantMap{
+        {QStringLiteral("key"), groupKey},
+        {QStringLiteral("animeId"), record.value(QStringLiteral("animeId"))},
+        {QStringLiteral("animeName"), record.value(QStringLiteral("animeName"))},
+        {QStringLiteral("animeImage"), record.value(QStringLiteral("animeImage"))},
+        {QStringLiteral("episodes"), QVariantList{}},
+        {QStringLiteral("episodeCount"), 0},
+        {QStringLiteral("completedCount"), 0},
+        {QStringLiteral("activeCount"), 0},
+        {QStringLiteral("failedCount"), 0},
+        {QStringLiteral("progress"), 0.0},
+      });
+    }
+    auto group = m_groups.at(groupIndex).toMap();
+    auto episodes = group.value(QStringLiteral("episodes")).toList();
+    episodes.append(record);
+    group.insert(QStringLiteral("episodes"), episodes);
+    group.insert(QStringLiteral("episodeCount"), episodes.size());
+    group.insert(QStringLiteral("progress"), group.value(QStringLiteral("progress")).toDouble() + record.value(QStringLiteral("progress")).toDouble());
+    const auto state = record.value(QStringLiteral("state")).toString();
+    if (state == QStringLiteral("completed"))
+      group.insert(QStringLiteral("completedCount"), group.value(QStringLiteral("completedCount")).toInt() + 1);
+    if (state == QStringLiteral("queued") || state == QStringLiteral("preparing") ||
+        state == QStringLiteral("downloading") || state == QStringLiteral("validating"))
+      group.insert(QStringLiteral("activeCount"), group.value(QStringLiteral("activeCount")).toInt() + 1);
+    if (state == QStringLiteral("failed"))
+      group.insert(QStringLiteral("failedCount"), group.value(QStringLiteral("failedCount")).toInt() + 1);
+    if (group.value(QStringLiteral("animeImage")).toString().isEmpty() && !record.value(QStringLiteral("animeImage")).toString().isEmpty())
+      group.insert(QStringLiteral("animeImage"), record.value(QStringLiteral("animeImage")));
+    m_groups[groupIndex] = group;
+  }
+  for (qsizetype index = 0; index < m_groups.size(); ++index) {
+    auto group = m_groups.at(index).toMap();
+    const auto count = qMax(1, group.value(QStringLiteral("episodeCount")).toInt());
+    group.insert(QStringLiteral("progress"), group.value(QStringLiteral("progress")).toDouble() / count);
+    group.insert(QStringLiteral("state"), group.value(QStringLiteral("activeCount")).toInt() > 0
+      ? QStringLiteral("downloading")
+      : group.value(QStringLiteral("failedCount")).toInt() > 0
+        ? QStringLiteral("failed")
+        : group.value(QStringLiteral("completedCount")).toInt() == count
+          ? QStringLiteral("completed") : QStringLiteral("paused"));
+    m_groups[index] = group;
+  }
   emit itemsChanged();
 }
 
 DownloadManager::Job *DownloadManager::jobFor(const QString &id) const { return m_jobs.value(id, nullptr); }
+
+QVariantMap DownloadManager::episodeStatus(const QString &animeId, const QString &episodeId) const {
+  for (auto it = m_pendingEpisodes.cbegin(); it != m_pendingEpisodes.cend(); ++it) {
+    const auto pending = it.value();
+    if (pending.value(QStringLiteral("animeId")).toString() == animeId &&
+        pending.value(QStringLiteral("episodeId"), pending.value(QStringLiteral("id"))).toString() == episodeId) {
+      auto value = pending;
+      value.insert(QStringLiteral("state"), QStringLiteral("preparing"));
+      value.insert(QStringLiteral("progress"), 0.0);
+      return value;
+    }
+  }
+  for (const auto &value : m_items) {
+    const auto record = value.toMap();
+    if (record.value(QStringLiteral("animeId")).toString() == animeId &&
+        record.value(QStringLiteral("episodeId")).toString() == episodeId) return record;
+  }
+  return {};
+}
 
 QString DownloadManager::enqueue(const QVariantMap &episode, const QVariantMap &stream, int preferredHeight) {
   if (!m_account->authenticated()) { setError(QStringLiteral("Sign in to download episodes.")); return {}; }
@@ -159,7 +233,7 @@ QString DownloadManager::enqueue(const QVariantMap &episode, const QVariantMap &
   if (!job->record.contains(QStringLiteral("episodeNumber"))) job->record.insert(QStringLiteral("episodeNumber"), episode.value(QStringLiteral("number")));
   if (!job->record.contains(QStringLiteral("episodeName"))) job->record.insert(QStringLiteral("episodeName"), episode.value(QStringLiteral("title"), QStringLiteral("Episode %1").arg(episode.value(QStringLiteral("number")).toInt())));
   job->record.insert(QStringLiteral("audioMode"), stream.value(QStringLiteral("audioMode"), episode.value(QStringLiteral("audioMode"), QStringLiteral("sub"))));
-  job->record.insert(QStringLiteral("server"), stream.value(QStringLiteral("server"), episode.value(QStringLiteral("server"), QStringLiteral("hd-1"))));
+  job->record.insert(QStringLiteral("server"), stream.value(QStringLiteral("server"), episode.value(QStringLiteral("server"), QStringLiteral("hd-2"))));
   job->record.insert(QStringLiteral("id"), job->id);
   job->record.insert(QStringLiteral("ownerId"), m_account->user().value(QStringLiteral("id")).toString());
   job->record.insert(QStringLiteral("mediaUrl"), media.toString(QUrl::FullyEncoded));
@@ -184,14 +258,28 @@ QString DownloadManager::enqueue(const QVariantMap &episode, const QVariantMap &
 
 void DownloadManager::enqueueEpisode(const QVariantMap &episode, int preferredHeight) {
   if (!m_account->authenticated()) { setError(QStringLiteral("Sign in to download episodes.")); return; }
+  const auto animeId = episode.value(QStringLiteral("animeId")).toString();
+  const auto episodeId = episode.value(QStringLiteral("episodeId"), episode.value(QStringLiteral("id"))).toString();
+  const auto existing = episodeStatus(animeId, episodeId);
+  const auto existingState = existing.value(QStringLiteral("state")).toString();
+  if (!existingState.isEmpty()) {
+    if (existingState == QStringLiteral("paused") || existingState == QStringLiteral("failed") || existingState == QStringLiteral("cancelled"))
+      resume(existing.value(QStringLiteral("id")).toString());
+    else
+      setError(existingState == QStringLiteral("completed") ? QStringLiteral("This episode is already downloaded.")
+                                                              : QStringLiteral("This episode is already being downloaded."));
+    return;
+  }
   auto pending = episode;
   pending.insert(QStringLiteral("preferredHeight"), preferredHeight);
+  if (!pending.contains(QStringLiteral("server")))
+    pending.insert(QStringLiteral("server"), QSettings().value(QStringLiteral("playback/server"), QStringLiteral("hd-2")));
   const int generation = ++m_resolveGeneration;
   m_pendingEpisodes.insert(generation, pending);
   emit preparingChanged();
   m_provider->resolveStream(generation,
     episode.value(QStringLiteral("episodeId"), episode.value(QStringLiteral("id"))).toString(),
-    episode.value(QStringLiteral("server"), QStringLiteral("hd-1")).toString(),
+    pending.value(QStringLiteral("server"), QStringLiteral("hd-2")).toString(),
     episode.value(QStringLiteral("audioMode"), QStringLiteral("sub")).toString());
 }
 

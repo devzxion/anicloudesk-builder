@@ -50,6 +50,7 @@ AppRuntime::~AppRuntime() { delete m_trayMenu; }
 
 QString AppRuntime::audioPreference() const { return m_settings.value(QStringLiteral("playback/audio"), QStringLiteral("sub")).toString(); }
 QString AppRuntime::playbackQuality() const { return m_settings.value(QStringLiteral("playback/quality"), QStringLiteral("auto")).toString(); }
+QString AppRuntime::serverPreference() const { return m_settings.value(QStringLiteral("playback/server"), QStringLiteral("hd-2")).toString(); }
 int AppRuntime::downloadQuality() const { return m_settings.value(QStringLiteral("downloads/quality"), 1080).toInt(); }
 bool AppRuntime::allowMeteredDownloads() const { return m_settings.value(QStringLiteral("downloads/allowMetered"), false).toBool(); }
 bool AppRuntime::notificationsEnabled() const { return m_settings.value(QStringLiteral("notifications/enabled"), true).toBool(); }
@@ -65,6 +66,10 @@ void AppRuntime::setRoute(const QString &route) {
 }
 void AppRuntime::setAudioPreference(const QString &value) { m_settings.setValue(QStringLiteral("playback/audio"), value); emit preferencesChanged(); }
 void AppRuntime::setPlaybackQuality(const QString &value) { m_settings.setValue(QStringLiteral("playback/quality"), value); emit preferencesChanged(); }
+void AppRuntime::setServerPreference(const QString &value) {
+  m_settings.setValue(QStringLiteral("playback/server"), value == QStringLiteral("hd-1") ? QStringLiteral("hd-1") : QStringLiteral("hd-2"));
+  emit preferencesChanged();
+}
 void AppRuntime::setDownloadQuality(int value) { m_settings.setValue(QStringLiteral("downloads/quality"), value); emit preferencesChanged(); }
 void AppRuntime::setAllowMeteredDownloads(bool value) { m_settings.setValue(QStringLiteral("downloads/allowMetered"), value); emit preferencesChanged(); }
 void AppRuntime::setNotificationsEnabled(bool value) {

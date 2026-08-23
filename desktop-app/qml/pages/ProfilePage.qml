@@ -102,6 +102,16 @@ Flickable {
                     }
                     RowLayout {
                         Layout.fillWidth: true; Layout.preferredHeight: 42
+                        Text { text: "Default server"; color: Theme.text; Layout.fillWidth: true }
+                        ComboBox {
+                            Layout.preferredWidth: 158; model: ["HD2", "HD1"]
+                            currentIndex: Runtime.serverPreference === "hd-1" ? 1 : 0
+                            onActivated: Runtime.serverPreference = currentIndex === 1 ? "hd-1" : "hd-2"
+                            Accessible.name: "Default playback server"
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true; Layout.preferredHeight: 42
                         Text { text: "Download quality"; color: Theme.text; Layout.fillWidth: true }
                         ComboBox {
                             Layout.preferredWidth: 158; model: ["1080p", "720p", "480p", "360p"]

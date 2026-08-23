@@ -14,6 +14,7 @@ class AppRuntime final : public QObject {
   Q_PROPERTY(QVariantList localHistory READ localHistory NOTIFY localHistoryChanged)
   Q_PROPERTY(QString audioPreference READ audioPreference WRITE setAudioPreference NOTIFY preferencesChanged)
   Q_PROPERTY(QString playbackQuality READ playbackQuality WRITE setPlaybackQuality NOTIFY preferencesChanged)
+  Q_PROPERTY(QString serverPreference READ serverPreference WRITE setServerPreference NOTIFY preferencesChanged)
   Q_PROPERTY(int downloadQuality READ downloadQuality WRITE setDownloadQuality NOTIFY preferencesChanged)
   Q_PROPERTY(bool allowMeteredDownloads READ allowMeteredDownloads WRITE setAllowMeteredDownloads NOTIFY preferencesChanged)
   Q_PROPERTY(bool notificationsEnabled READ notificationsEnabled WRITE setNotificationsEnabled NOTIFY preferencesChanged)
@@ -30,6 +31,7 @@ public:
   [[nodiscard]] QVariantList localHistory() const { return m_localHistory; }
   [[nodiscard]] QString audioPreference() const;
   [[nodiscard]] QString playbackQuality() const;
+  [[nodiscard]] QString serverPreference() const;
   [[nodiscard]] int downloadQuality() const;
   [[nodiscard]] bool allowMeteredDownloads() const;
   [[nodiscard]] bool notificationsEnabled() const;
@@ -41,6 +43,7 @@ public:
   void setRoute(const QString &route);
   void setAudioPreference(const QString &value);
   void setPlaybackQuality(const QString &value);
+  void setServerPreference(const QString &value);
   void setDownloadQuality(int value);
   void setAllowMeteredDownloads(bool value);
   void setNotificationsEnabled(bool value);

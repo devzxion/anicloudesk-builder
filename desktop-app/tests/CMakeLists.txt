@@ -7,6 +7,14 @@ target_compile_definitions(anicloud_hls_tests PRIVATE ANICLOUD_FIXTURE_DIR="${CM
 target_link_libraries(anicloud_hls_tests PRIVATE Qt6::Core Qt6::Network Qt6::Test)
 add_test(NAME hls_tools COMMAND anicloud_hls_tests)
 
+qt_add_executable(anicloud_subtitle_tests
+  test_subtitletools.cpp
+  ../src/SubtitleTools.cpp
+)
+target_include_directories(anicloud_subtitle_tests PRIVATE ../src)
+target_link_libraries(anicloud_subtitle_tests PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME native_subtitle_cues COMMAND anicloud_subtitle_tests)
+
 qt_add_executable(anicloud_hls_gateway_tests
   test_hlsgateway.cpp
   ../src/HlsGateway.cpp

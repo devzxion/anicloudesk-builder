@@ -24,7 +24,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             height: 210
-            source: root.anime.poster || root.anime.image || ""
+            source: root.anime.poster || root.anime.image || root.anime.animeImage || ""
             fillMode: Image.PreserveAspectCrop
             asynchronous: true
             cache: true

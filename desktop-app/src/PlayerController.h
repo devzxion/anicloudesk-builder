@@ -2,15 +2,21 @@
 
 #include <QAudioOutput>
 #include <QMediaPlayer>
+#include <QNetworkAccessManager>
 #include <QObject>
+#include <QPointer>
+#include <QSet>
 #include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QVideoSink>
 
+#include "SubtitleTools.h"
+
 class AccountClient;
 class HlsGateway;
 class ProviderClient;
+class QNetworkReply;
 
 class PlayerController final : public QObject {
   Q_OBJECT
@@ -27,6 +33,9 @@ class PlayerController final : public QObject {
   Q_PROPERTY(bool playing READ playing NOTIFY stateChanged)
   Q_PROPERTY(bool captionsEnabled READ captionsEnabled WRITE setCaptionsEnabled NOTIFY captionsChanged)
   Q_PROPERTY(QVariantList captions READ captions NOTIFY captionsChanged)
+  Q_PROPERTY(QString subtitleText READ subtitleText NOTIFY captionsChanged)
+  Q_PROPERTY(QString captionStatus READ captionStatus NOTIFY captionsChanged)
+  Q_PROPERTY(int selectedCaptionIndex READ selectedCaptionIndex NOTIFY captionsChanged)
   Q_PROPERTY(QVariantMap current READ current NOTIFY currentChanged)
   Q_PROPERTY(qint64 introStart READ introStart NOTIFY currentChanged)
   Q_PROPERTY(qint64 introEnd READ introEnd NOTIFY currentChanged)
@@ -49,6 +58,9 @@ public:
   [[nodiscard]] bool playing() const { return m_player.playbackState() == QMediaPlayer::PlayingState; }
   [[nodiscard]] bool captionsEnabled() const { return m_captionsEnabled; }
   [[nodiscard]] QVariantList captions() const { return m_captions; }
+  [[nodiscard]] QString subtitleText() const { return m_subtitleText; }
+  [[nodiscard]] QString captionStatus() const { return m_captionStatus; }
+  [[nodiscard]] int selectedCaptionIndex() const { return m_selectedCaptionIndex; }
   [[nodiscard]] QVariantMap current() const { return m_current; }
   [[nodiscard]] qint64 introStart() const { return m_stream.value(QStringLiteral("introStart")).toLongLong() * 1000; }
   [[nodiscard]] qint64 introEnd() const { return m_stream.value(QStringLiteral("introEnd")).toLongLong() * 1000; }
@@ -107,12 +119,20 @@ private:
   void scheduleFailure(const QString &message);
   void refreshTracks();
   void applyAudioGain();
+  void loadCaption(int index);
+  void fetchNextCaptionResource(int generation);
+  void handleCaptionResource(const QByteArray &body, const QUrl &url, int generation);
+  void cancelCaptionRequest();
+  void updateSubtitleText(qint64 position);
+  void setCaptionStatus(const QString &status);
 
   ProviderClient *m_provider = nullptr;
   AccountClient *m_account = nullptr;
   HlsGateway *m_gateway = nullptr;
   QMediaPlayer m_player;
   QAudioOutput m_audio;
+  QNetworkAccessManager m_subtitleNetwork;
+  QPointer<QNetworkReply> m_subtitleReply;
   QTimer m_progressTimer;
   QTimer m_bufferTimer;
   QVariantMap m_current;
@@ -120,7 +140,7 @@ private:
   QVariantList m_captions;
   QString m_state = QStringLiteral("idle");
   QString m_error;
-  QString m_server = QStringLiteral("hd-1");
+  QString m_server = QStringLiteral("hd-2");
   QString m_audioMode = QStringLiteral("sub");
   QString m_quality = QStringLiteral("auto");
   QString m_sessionId;
@@ -129,7 +149,15 @@ private:
   bool m_restorePlaying = true;
   double m_restoreSpeed = 1.0;
   int m_restoreCaptionIndex = -1;
+  int m_selectedCaptionIndex = -1;
+  int m_captionGeneration = 0;
   bool m_captionsEnabled = true;
+  QList<QUrl> m_captionQueue;
+  QSet<QString> m_captionVisited;
+  QByteArray m_captionDocument;
+  QList<SubtitleTools::Cue> m_subtitleCues;
+  QString m_subtitleText;
+  QString m_captionStatus = QStringLiteral("off");
   double m_volume = 0.8;
   double m_volumeBoost = 1.0;
   int m_generation = 0;
