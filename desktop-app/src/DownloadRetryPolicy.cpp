@@ -56,7 +56,8 @@ int delayMs(int attempt, const QByteArray &retryAfter, qint64 nowMs) {
       delay = qMax(delay, qMin<qint64>(MaximumRetryAfterMs, retryAt.toMSecsSinceEpoch() - current));
     }
   }
-  return static_cast<int>(qBound<qint64>(BaseDelayMs, delay, MaximumRetryAfterMs));
+  return static_cast<int>(qBound<qint64>(static_cast<qint64>(BaseDelayMs), delay,
+                                         static_cast<qint64>(MaximumRetryAfterMs)));
 }
 
 }
