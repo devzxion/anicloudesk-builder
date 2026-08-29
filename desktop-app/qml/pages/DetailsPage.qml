@@ -37,7 +37,13 @@ Flickable {
     contentWidth: width
     contentHeight: content.implicitHeight + 40
     clip: true
+    boundsBehavior: Flickable.StopAtBounds
     ScrollBar.vertical: ScrollBar {}
+    readonly property bool atRefreshBoundary: contentY <= originY + 1
+
+    function refreshPage() {
+        if (animeId.length > 0) Provider.loadDetails(animeId)
+    }
 
     onAnimeIdChanged: if (animeId.length > 0) { episodeLimit = 24; Provider.loadDetails(animeId) }
 

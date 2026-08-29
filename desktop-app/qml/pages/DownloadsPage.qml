@@ -6,6 +6,7 @@ import AniCloud
 Item {
     id: root
     property string selectedAnimeKey: ""
+    readonly property bool atRefreshBoundary: selectedAnimeKey.length > 0 ? episodeList.atYBeginning : animeList.atYBeginning
     readonly property var selectedGroup: {
         for (const group of Downloads.groups) {
             if (String(group.key) === selectedAnimeKey) return group
@@ -22,6 +23,8 @@ Item {
         if (item.state === "failed") return item.failure || "Download failed"
         return item.state || "Waiting"
     }
+
+    function refreshPage() { Downloads.reload() }
 
     ColumnLayout {
         anchors.fill: parent; anchors.margins: 30; spacing: 18

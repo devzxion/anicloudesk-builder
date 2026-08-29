@@ -12,6 +12,13 @@ Flickable {
     boundsBehavior: Flickable.StopAtBounds
     ScrollBar.vertical: ScrollBar {}
     readonly property bool narrow: width < 850
+    readonly property bool atRefreshBoundary: contentY <= originY + 1
+
+    function refreshPage() {
+        Runtime.refreshLocalHistory()
+        if (Account.authenticated) Account.refreshLibrary()
+        Updates.check()
+    }
 
     ColumnLayout {
         id: content

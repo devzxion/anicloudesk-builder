@@ -49,8 +49,8 @@ private slots:
     QVERIFY(navigationSource.contains("navigationFocus.activeFocus"));
     QVERIFY(navigationSource.contains("routeSelected"));
     QVERIFY(navigationSource.contains("Notifications"));
-    QVERIFY(mainSource.contains("showBroadcastNotification"));
     QVERIFY(mainSource.contains("onShowWindowRequested"));
+    QVERIFY(mainSource.contains("WindowControlButton"));
   }
 
   void detailsExposePublicShareLink() {
@@ -83,8 +83,55 @@ private slots:
     QVERIFY(mainSource.contains("--background"));
     QVERIFY(mainSource.contains("QLocalServer"));
     QVERIFY(mainSource.contains("60 * 1000"));
+    QVERIFY(mainSource.contains("AccountClient::broadcastsChanged"));
+    QVERIFY(mainSource.contains("showBroadcastNotification"));
     QVERIFY(mainSource.contains("else QTimer::singleShot(3000, &updates, &UpdateService::check)"));
     QVERIFY(mainSource.contains("AniCloud update available"));
+  }
+
+  void backgroundActivationLoadsHomeAndColdLaunchDoesNotRestoreTheLastRoute() {
+    QFile runtime(QStringLiteral(ANICLOUD_SOURCE_DIR "/src/AppRuntime.cpp")); QVERIFY(runtime.open(QIODevice::ReadOnly));
+    QFile runtimeHeader(QStringLiteral(ANICLOUD_SOURCE_DIR "/src/AppRuntime.h")); QVERIFY(runtimeHeader.open(QIODevice::ReadOnly));
+    QFile main(QStringLiteral(ANICLOUD_SOURCE_DIR "/src/main.cpp")); QVERIFY(main.open(QIODevice::ReadOnly));
+    const auto runtimeSource = runtime.readAll();
+    const auto headerSource = runtimeHeader.readAll();
+    const auto mainSource = main.readAll();
+    QVERIFY(runtimeSource.contains("m_route = QStringLiteral(\"home\")"));
+    QVERIFY(!runtimeSource.contains("navigation/lastRoute\"), QStringLiteral(\"home\")"));
+    QVERIFY(runtimeSource.contains("activateForeground"));
+    QVERIFY(headerSource.contains("backgroundLaunchChanged"));
+    QVERIFY(headerSource.contains("foregroundActivated"));
+    QVERIFY(mainSource.contains("AppRuntime::foregroundActivated"));
+    QVERIFY(mainSource.contains("ProviderClient::loadHome"));
+    QVERIFY(mainSource.contains("runtime.activateForeground()"));
+  }
+
+  void pagesSupportScrollUpRefresh() {
+    QFile main(QStringLiteral(ANICLOUD_SOURCE_DIR "/qml/Main.qml")); QVERIFY(main.open(QIODevice::ReadOnly));
+    const auto mainSource = main.readAll();
+    QVERIFY(mainSource.contains("WheelHandler"));
+    QVERIFY(mainSource.contains("refreshWheelDistance >= 360"));
+    QVERIFY(mainSource.contains("Scroll up to refresh"));
+    for (const auto *page : {"HomePage.qml", "DiscoverPage.qml", "DetailsPage.qml", "DownloadsPage.qml",
+                             "LibraryPage.qml", "ProfilePage.qml", "BroadcastsPage.qml"}) {
+      QFile source(QStringLiteral(ANICLOUD_SOURCE_DIR "/qml/pages/") + QString::fromLatin1(page));
+      QVERIFY2(source.open(QIODevice::ReadOnly), page);
+      const auto contents = source.readAll();
+      QVERIFY2(contents.contains("atRefreshBoundary"), page);
+      QVERIFY2(contents.contains("refreshPage"), page);
+    }
+  }
+
+  void windowAndPlayerControlsUseCenteredSvgIcons() {
+    QFile cmake(QStringLiteral(ANICLOUD_SOURCE_DIR "/CMakeLists.txt")); QVERIFY(cmake.open(QIODevice::ReadOnly));
+    QFile player(QStringLiteral(ANICLOUD_SOURCE_DIR "/qml/pages/PlayerPage.qml")); QVERIFY(player.open(QIODevice::ReadOnly));
+    const auto cmakeSource = cmake.readAll();
+    for (const auto *asset : {"WindowControlButton.qml", "window-minimize.svg", "window-maximize.svg",
+                              "window-restore.svg", "window-close.svg"})
+      QVERIFY2(cmakeSource.contains(asset), asset);
+    const auto playerSource = player.readAll();
+    QVERIFY(playerSource.contains("implicitWidth: 136"));
+    QVERIFY(playerSource.contains("sourceSize.width: 18"));
   }
 
   void windowsStartupChoiceSurvivesInstallerUpdates() {

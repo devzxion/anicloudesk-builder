@@ -13,6 +13,15 @@ Item {
     property var recentSearches: {
         try { return JSON.parse(searchSettings.recent) } catch (error) { return [] }
     }
+    readonly property bool atRefreshBoundary: grid.atYBeginning
+
+    function refreshPage() {
+        Provider.loadTaxonomy()
+        page = 1
+        if (taxonomyItem) Provider.browseGenre(taxonomyItem.id, taxonomyItem.slug, 1)
+        else if (searchField.text.trim().length > 0) Provider.search(searchField.text.trim(), 1)
+        else Provider.loadCategory(categoryIndex === 0 ? "recent" : categoryIndex === 1 ? "popular" : "airing", 1)
+    }
 
     ColumnLayout {
         anchors.fill: parent; anchors.margins: 30; spacing: 18

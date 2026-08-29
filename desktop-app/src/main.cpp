@@ -88,6 +88,7 @@ int main(int argc, char *argv[]) {
   DownloadManager downloads(&database, &account, &provider);
   UpdateService updates;
   AppRuntime runtime(&database, backgroundLaunch);
+  QObject::connect(&runtime, &AppRuntime::foregroundActivated, &provider, &ProviderClient::loadHome);
   QObject::connect(&updates, &UpdateService::installerStarted, &app, [&app, &player] {
     // The installer owns the retry prompt if an unrelated/stuck AniCloud
     // process remains. This instance always saves playback and leaves the
@@ -124,7 +125,7 @@ int main(int argc, char *argv[]) {
           activate = false;
         }
       }
-      if (activate) runtime.requestShow();
+      if (activate) runtime.activateForeground();
       socket->disconnectFromServer();
       socket->deleteLater();
     }
@@ -133,8 +134,18 @@ int main(int argc, char *argv[]) {
   QObject::connect(&account, &AccountClient::operationSucceeded, &runtime, [&runtime](const QString &message) { runtime.showNotification(QStringLiteral("AniCloud"), message); });
   QObject::connect(&account, &AccountClient::localProgressSaved, &runtime, &AppRuntime::refreshLocalHistory);
   QObject::connect(&account, &AccountClient::sessionExpired, &runtime, [&runtime] { runtime.setRoute(QStringLiteral("auth")); });
-  QObject::connect(&updates, &UpdateService::updateChanged, &runtime, [&updates, &runtime, backgroundLaunch] {
-    if (backgroundLaunch && updates.updateAvailable())
+  QObject::connect(&account, &AccountClient::broadcastsChanged, &runtime, [&account, &runtime] {
+    const auto broadcasts = account.broadcasts();
+    if (broadcasts.isEmpty()) return;
+    const auto latest = broadcasts.first().toMap();
+    if (latest.value(QStringLiteral("read")).toBool()) return;
+    runtime.showBroadcastNotification(latest.value(QStringLiteral("id")).toString(),
+                                      latest.value(QStringLiteral("title"), QStringLiteral("AniCloud")).toString(),
+                                      latest.value(QStringLiteral("message"), QStringLiteral("New notification")).toString(),
+                                      latest.value(QStringLiteral("linkUrl")).toString());
+  });
+  QObject::connect(&updates, &UpdateService::updateChanged, &runtime, [&updates, &runtime] {
+    if (runtime.backgroundLaunch() && updates.updateAvailable())
       runtime.showNotification(QStringLiteral("AniCloud update available"),
                                QStringLiteral("AniCloud %1 is ready to download. Open AniCloud to update.")
                                  .arg(updates.availableVersion()));

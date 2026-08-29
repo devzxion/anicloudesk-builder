@@ -23,7 +23,7 @@ class AppRuntime final : public QObject {
   Q_PROPERTY(bool allowMeteredDownloads READ allowMeteredDownloads WRITE setAllowMeteredDownloads NOTIFY preferencesChanged)
   Q_PROPERTY(bool notificationsEnabled READ notificationsEnabled WRITE setNotificationsEnabled NOTIFY preferencesChanged)
   Q_PROPERTY(bool startAtLogin READ startAtLogin WRITE setStartAtLogin NOTIFY preferencesChanged)
-  Q_PROPERTY(bool backgroundLaunch READ backgroundLaunch CONSTANT)
+  Q_PROPERTY(bool backgroundLaunch READ backgroundLaunch NOTIFY backgroundLaunchChanged)
   Q_PROPERTY(bool trayAvailable READ trayAvailable CONSTANT)
   Q_PROPERTY(QString pendingRoute READ pendingRoute NOTIFY pendingRouteChanged)
 
@@ -71,6 +71,7 @@ public:
   Q_INVOKABLE QString animeShareUrl(const QString &animeId) const;
   Q_INVOKABLE void shareAnime(const QString &animeId, const QString &title = {});
   Q_INVOKABLE void requestShow();
+  void activateForeground(bool resetColdRoute = true);
   Q_INVOKABLE void quitApplication();
   Q_INVOKABLE QVariant windowValue(const QString &key, const QVariant &fallback = {}) const;
   Q_INVOKABLE void setWindowValue(const QString &key, const QVariant &value);
@@ -83,6 +84,8 @@ signals:
   void pendingRouteChanged();
   void deepLinkReceived(const QString &route);
   void showWindowRequested();
+  void backgroundLaunchChanged();
+  void foregroundActivated();
   void shareLinkCopied(const QString &url);
 
 private:
@@ -94,6 +97,7 @@ private:
   QSystemTrayIcon *m_tray = nullptr;
   QMenu *m_trayMenu = nullptr;
   bool m_backgroundLaunch = false;
+  bool m_foregroundActivated = true;
   QString m_notificationLink;
   QString m_route = QStringLiteral("home");
   QString m_pendingRoute;

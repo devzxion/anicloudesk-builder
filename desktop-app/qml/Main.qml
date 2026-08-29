@@ -14,6 +14,17 @@ ApplicationWindow {
     color: Theme.background
     flags: Qt.Window | Qt.FramelessWindowHint
     property bool compactNavigation: width < 900
+    property int refreshWheelDistance: 0
+    property bool refreshFeedback: false
+
+    function refreshCurrentPage() {
+        const page = pageLoader.item
+        if (!page || typeof page.refreshPage !== "function") return
+        page.refreshPage()
+        refreshWheelDistance = 0
+        refreshFeedback = true
+        refreshFeedbackTimer.restart()
+    }
 
     Component.onCompleted: {
         const savedX = Number(Runtime.windowValue("x", -1))
@@ -44,17 +55,36 @@ ApplicationWindow {
             Text { text: "Ani"; color: Theme.red; font.pixelSize: 17; font.weight: Font.Black }
             Text { text: "Cloud"; color: "#FFFFFF"; font.pixelSize: 17; font.weight: Font.Black }
             Item { Layout.fillWidth: true }
-            Button { text: "—"; implicitWidth: 46; implicitHeight: 42; flat: true; palette.buttonText: Theme.text; Accessible.name: "Minimize"; onClicked: window.showMinimized() }
-            Button { text: window.visibility === Window.Maximized ? "❐" : "□"; implicitWidth: 46; implicitHeight: 42; flat: true; palette.buttonText: Theme.text; Accessible.name: "Maximize"; onClicked: window.visibility === Window.Maximized ? window.showNormal() : window.showMaximized() }
-            Button {
-                text: "×"; implicitWidth: 46; implicitHeight: 42; flat: true
-                palette.buttonText: Theme.text; Accessible.name: "Close"
-                background: Rectangle { color: parent.hovered ? Theme.red : "transparent" }
-                onClicked: window.close()
+            WindowControlButton { iconName: "minimize"; Accessible.name: "Minimize"; onClicked: window.showMinimized() }
+            WindowControlButton {
+                iconName: window.visibility === Window.Maximized ? "restore" : "maximize"
+                Accessible.name: window.visibility === Window.Maximized ? "Restore" : "Maximize"
+                onClicked: window.visibility === Window.Maximized ? window.showNormal() : window.showMaximized()
             }
+            WindowControlButton { iconName: "close"; destructive: true; Accessible.name: "Close"; onClicked: window.close() }
         }
         DragHandler { onActiveChanged: if (active) window.startSystemMove() }
         TapHandler { acceptedButtons: Qt.LeftButton; onDoubleTapped: window.visibility === Window.Maximized ? window.showNormal() : window.showMaximized() }
+    }
+
+    Timer { id: refreshWheelReset; interval: 700; onTriggered: window.refreshWheelDistance = 0 }
+    Timer { id: refreshFeedbackTimer; interval: 1100; onTriggered: window.refreshFeedback = false }
+    WheelHandler {
+        target: null
+        blocking: false
+        enabled: Player.state === "idle" && !Updates.mandatory
+        onWheel: event => {
+            const page = pageLoader.item
+            const atTop = page && page.atRefreshBoundary === true
+            const delta = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y
+            if (!atTop || typeof page.refreshPage !== "function" || delta <= 0) {
+                window.refreshWheelDistance = 0
+                return
+            }
+            window.refreshWheelDistance += delta
+            refreshWheelReset.restart()
+            if (window.refreshWheelDistance >= 360) window.refreshCurrentPage()
+        }
     }
 
     NavigationRail {
@@ -95,6 +125,19 @@ ApplicationWindow {
                 item.animeId = decodeURIComponent(Runtime.route.substring(8))
         }
         Connections { target: Runtime; function onRouteChanged() { pageLoader.updateDetailsRoute() } }
+    }
+
+    Rectangle {
+        anchors.top: titleBar.bottom; anchors.topMargin: 10
+        x: pageLoader.x + (pageLoader.width - width) / 2
+        width: 156; height: 34; radius: 17; z: 80
+        visible: window.refreshFeedback || window.refreshWheelDistance > 0
+        color: "#E6202024"; border.color: window.refreshFeedback ? Theme.red : Theme.border
+        Text {
+            anchors.centerIn: parent
+            text: window.refreshFeedback ? "Refreshing…" : "Scroll up to refresh"
+            color: Theme.text; font.pixelSize: 12; font.weight: Font.DemiBold
+        }
     }
 
     Component { id: homePage; HomePage {} }
@@ -158,16 +201,10 @@ ApplicationWindow {
         }
     }
     Connections {
-        target: Account
-        function onBroadcastsChanged() {
-            if (Account.broadcasts.length && !Account.broadcasts[0].read)
-                Runtime.showBroadcastNotification(String(Account.broadcasts[0].id || ""), Account.broadcasts[0].title || "AniCloud", Account.broadcasts[0].message || "New notification", Account.broadcasts[0].linkUrl || "")
-        }
-    }
-    Connections {
         target: Runtime
         function onShowWindowRequested() {
-            window.show()
+            if (window.visibility === Window.Minimized) window.showNormal()
+            else window.show()
             window.raise()
             window.requestActivate()
         }

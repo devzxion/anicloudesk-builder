@@ -11,6 +11,7 @@ Flickable {
     boundsBehavior: Flickable.StopAtBounds
     ScrollBar.vertical: ScrollBar {}
     property int heroIndex: 0
+    readonly property bool atRefreshBoundary: contentY <= originY + 1
     readonly property var hero: Provider.spotlight.length > 0 ? Provider.spotlight.slice(0, 10) : Provider.popular.slice(0, 10)
 
     Timer { interval: 5000; repeat: true; running: root.visible && root.hero.length > 1; onTriggered: root.heroIndex = (root.heroIndex + 1) % root.hero.length }
@@ -62,4 +63,11 @@ Flickable {
 
     LoadingSkeleton { anchors.fill: parent; coverPage: true; rows: 4; active: Provider.loading && Provider.popular.length === 0; message: "Loading your home feed…"; z: 5 }
     EmptyState { anchors.centerIn: parent; visible: !Provider.loading && root.hero.length === 0 && Provider.error.length > 0; title: "Home is unavailable"; message: Provider.error; symbol: "!" }
+
+    function refreshPage() {
+        heroIndex = 0
+        Runtime.refreshLocalHistory()
+        if (Account.authenticated) Account.refreshLibrary()
+        Provider.loadHome()
+    }
 }

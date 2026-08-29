@@ -231,12 +231,14 @@ Rectangle {
                 }
                 Item { Layout.fillWidth: true }
                 Button {
-                    visible: !root.compact; implicitWidth: 132; implicitHeight: 40; hoverEnabled: true
+                    visible: !root.compact; implicitWidth: 136; implicitHeight: 40; hoverEnabled: true; padding: 0
                     Accessible.name: "Play next episode"
-                    contentItem: Row {
-                        anchors.centerIn: parent; spacing: 8
-                        Image { source: Qt.resolvedUrl("../../resources/icons/player-next.svg"); sourceSize.width: 20; sourceSize.height: 20; width: 20; height: 20 }
-                        Text { text: "Next episode"; color: "white"; font.pixelSize: 12; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
+                    contentItem: Item {
+                        RowLayout {
+                            anchors.centerIn: parent; spacing: 8
+                            Image { source: Qt.resolvedUrl("../../resources/icons/player-next.svg"); sourceSize.width: 18; sourceSize.height: 18; Layout.preferredWidth: 18; Layout.preferredHeight: 18; Layout.alignment: Qt.AlignVCenter }
+                            Text { text: "Next episode"; color: "white"; font.pixelSize: 12; font.weight: Font.DemiBold; Layout.alignment: Qt.AlignVCenter }
+                        }
                     }
                     background: Rectangle { radius: 20; color: parent.down ? "#40FFFFFF" : parent.hovered || parent.activeFocus ? "#2BFFFFFF" : "transparent"; border.color: "#5CFFFFFF" }
                     onClicked: Player.nextEpisode()

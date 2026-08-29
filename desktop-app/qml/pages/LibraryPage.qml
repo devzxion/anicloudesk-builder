@@ -6,12 +6,17 @@ import AniCloud
 Item {
     id: root
     property int tab: 0
+    readonly property bool atRefreshBoundary: list.atYBeginning
     readonly property var tabNames: ["My List", "History", "Completed", "Resume"]
     readonly property var activeModel: {
         if (tab === 0) return Account.authenticated ? Account.watchlist : []
         if (tab === 1) return Account.authenticated ? Account.history : Runtime.localHistory
         if (tab === 2) return Account.authenticated ? Account.completed : []
         return (Account.authenticated ? Account.history : Runtime.localHistory).filter(item => (item.positionSeconds || item.progressSeconds || 0) > 0)
+    }
+    function refreshPage() {
+        Runtime.refreshLocalHistory()
+        if (Account.authenticated) Account.refreshLibrary()
     }
     ColumnLayout {
         anchors.fill: parent; anchors.margins: 30; spacing: 16

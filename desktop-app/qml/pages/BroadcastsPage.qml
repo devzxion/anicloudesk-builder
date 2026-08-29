@@ -4,6 +4,9 @@ import QtQuick.Layouts
 import AniCloud
 
 Item {
+    id: root
+    readonly property bool atRefreshBoundary: list.atYBeginning
+    function refreshPage() { Account.refreshBroadcasts() }
     ColumnLayout {
         anchors.fill: parent; anchors.margins: 30; spacing: 18
         RowLayout { Layout.fillWidth: true; Text { text: "Notifications"; color: Theme.text; font.pixelSize: Theme.titleSize; font.weight: Font.Black; Layout.fillWidth: true } AppButton { text: "Refresh"; compact: true; secondary: true; onClicked: Account.refreshBroadcasts() } }

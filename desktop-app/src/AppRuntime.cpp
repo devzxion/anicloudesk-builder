@@ -27,7 +27,10 @@ QString escapedDesktopExec(QString value) {
 
 AppRuntime::AppRuntime(Database *database, bool backgroundLaunch, QObject *parent)
   : QObject(parent), m_database(database), m_settings(), m_backgroundLaunch(backgroundLaunch) {
-  m_route = m_settings.value(QStringLiteral("navigation/lastRoute"), QStringLiteral("home")).toString();
+  // Every new process is a cold launch and starts at Home. Navigation remains
+  // untouched while this process is merely minimized or hidden to the tray.
+  m_route = QStringLiteral("home");
+  m_foregroundActivated = !backgroundLaunch;
   if (QSystemTrayIcon::isSystemTrayAvailable()) {
     m_tray = new QSystemTrayIcon(QIcon(QStringLiteral(":/qt/qml/AniCloud/resources/icon.png")), this);
     m_tray->setToolTip(QStringLiteral("AniCloud"));
@@ -36,10 +39,10 @@ AppRuntime::AppRuntime(Database *database, bool backgroundLaunch, QObject *paren
     m_trayMenu->addSeparator();
     auto *quitAction = m_trayMenu->addAction(QStringLiteral("Quit AniCloud"));
     m_tray->setContextMenu(m_trayMenu);
-    connect(openAction, &QAction::triggered, this, &AppRuntime::requestShow);
+    connect(openAction, &QAction::triggered, this, [this] { activateForeground(); });
     connect(quitAction, &QAction::triggered, this, &AppRuntime::quitApplication);
     connect(m_tray, &QSystemTrayIcon::activated, this, [this](QSystemTrayIcon::ActivationReason reason) {
-      if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) requestShow();
+      if (reason == QSystemTrayIcon::Trigger || reason == QSystemTrayIcon::DoubleClick) activateForeground();
     });
     connect(m_tray, &QSystemTrayIcon::messageClicked, this, &AppRuntime::openNotificationLink);
     if (notificationsEnabled()) m_tray->show();
@@ -144,7 +147,7 @@ void AppRuntime::handleDeepLink(const QString &value) {
   if (route.isEmpty()) route = QStringLiteral("home");
   setRoute(route);
   emit deepLinkReceived(route);
-  requestShow();
+  activateForeground(false);
 }
 
 void AppRuntime::restorePendingRoute() {
@@ -184,11 +187,23 @@ void AppRuntime::shareAnime(const QString &animeId, const QString &) {
 
 void AppRuntime::requestShow() { emit showWindowRequested(); }
 
+void AppRuntime::activateForeground(bool resetColdRoute) {
+  const bool firstForeground = !m_foregroundActivated;
+  m_foregroundActivated = true;
+  if (m_backgroundLaunch) {
+    m_backgroundLaunch = false;
+    emit backgroundLaunchChanged();
+  }
+  if (firstForeground && resetColdRoute) setRoute(QStringLiteral("home"));
+  if (firstForeground) emit foregroundActivated();
+  requestShow();
+}
+
 void AppRuntime::quitApplication() { QCoreApplication::quit(); }
 
 void AppRuntime::openNotificationLink() {
   if (m_notificationLink.isEmpty()) {
-    requestShow();
+    activateForeground();
     return;
   }
   const QUrl url(m_notificationLink);

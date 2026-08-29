@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(AniCloudDesktop VERSION 4.1.2 LANGUAGES CXX)
+project(AniCloudDesktop VERSION 4.1.3 LANGUAGES CXX)
 
 if(WIN32)
   enable_language(RC)
@@ -106,6 +106,7 @@ qt_add_qml_module(AniCloud
     qml/components/LoadingSkeleton.qml
     qml/components/NavigationRail.qml
     qml/components/PlayerIconButton.qml
+    qml/components/WindowControlButton.qml
     qml/components/PosterRail.qml
     qml/pages/HomePage.qml
     qml/pages/DiscoverPage.qml
@@ -136,6 +137,10 @@ qt_add_qml_module(AniCloud
     resources/icons/player-next.svg
     resources/icons/player-back.svg
     resources/icons/player-lock.svg
+    resources/icons/window-minimize.svg
+    resources/icons/window-maximize.svg
+    resources/icons/window-restore.svg
+    resources/icons/window-close.svg
 )
 
 target_include_directories(AniCloud PRIVATE
