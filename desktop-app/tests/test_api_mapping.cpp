@@ -58,6 +58,26 @@ private slots:
     QVERIFY(stream.value(QStringLiteral("headers")).toMap().value(QStringLiteral("User-Agent")).toString().startsWith(QStringLiteral("Mozilla/")));
   }
 
+  void mapsCurrentProviderSourceAndCaptionPayload() {
+    const QJsonObject root{
+      {QStringLiteral("sources"), QStringLiteral("https://cdn.example/current/master.m3u8")},
+      {QStringLiteral("captions"), QJsonArray{
+        QJsonObject{{QStringLiteral("file"), QStringLiteral("https://cdn.example/current/en.vtt")},
+                    {QStringLiteral("label"), QStringLiteral("English")}},
+      }},
+      {QStringLiteral("intro"), QJsonObject{{QStringLiteral("start"), QStringLiteral("2")}, {QStringLiteral("end"), 85}}},
+      {QStringLiteral("outro"), QJsonObject{{QStringLiteral("start"), 1300}, {QStringLiteral("end"), 1360}}},
+      {QStringLiteral("referer"), QStringLiteral("https://megaplay.buzz/")},
+      {QStringLiteral("origin"), QStringLiteral("https://megaplay.buzz")},
+    };
+    const auto stream = ProviderClient::streamMap(root, QStringLiteral("episode"), QStringLiteral("hd-2"), QStringLiteral("dub"));
+    QCOMPARE(stream.value(QStringLiteral("mediaUrl")).toString(), QStringLiteral("https://cdn.example/current/master.m3u8"));
+    QCOMPARE(stream.value(QStringLiteral("subtitles")).toList().size(), 1);
+    QCOMPARE(stream.value(QStringLiteral("introEnd")).toInt(), 85);
+    QCOMPARE(stream.value(QStringLiteral("outroStart")).toInt(), 1300);
+    QCOMPARE(stream.value(QStringLiteral("headers")).toMap().value(QStringLiteral("Origin")).toString(), QStringLiteral("https://megaplay.buzz"));
+  }
+
   void parsesBundledCatalogPagesWithoutAccountApi() {
     const auto topHtml = QStringLiteral(
       "<tr class=\"ranking-list\">"

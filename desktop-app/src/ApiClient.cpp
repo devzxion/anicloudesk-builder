@@ -16,6 +16,7 @@
 #include <QUuid>
 #include <QSet>
 #include <initializer_list>
+#include <memory>
 #include <utility>
 
 namespace {
@@ -156,6 +157,7 @@ QList<QPair<QByteArray, QByteArray>> megaplayHeaders(const QUrl &referer = {}) {
   QList<QPair<QByteArray, QByteArray>> headers{
     {QByteArrayLiteral("User-Agent"), ProviderUserAgent},
     {QByteArrayLiteral("Accept-Language"), QByteArrayLiteral("en-US,en;q=0.9")},
+    {QByteArrayLiteral("Origin"), QByteArrayLiteral("https://megaplay.buzz")},
     {QByteArrayLiteral("Referer"), referer.isValid() ? referer.toString().toUtf8()
                                                      : QByteArrayLiteral("https://megaplay.buzz/")},
   };
@@ -854,6 +856,7 @@ QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &ep
   auto sources = data.value(QStringLiteral("sources")).toArray();
   if (sources.isEmpty() && data.value(QStringLiteral("source")).isArray()) sources = data.value(QStringLiteral("source")).toArray();
   if (sources.isEmpty() && data.value(QStringLiteral("sources")).isObject()) sources.append(data.value(QStringLiteral("sources")));
+  if (sources.isEmpty() && data.value(QStringLiteral("source")).isObject()) sources.append(data.value(QStringLiteral("source")));
   QVariantList alternates;
   QString selected;
   for (const auto &sourceValue : sources) {
@@ -866,20 +869,31 @@ QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &ep
     const auto label = source.value(QStringLiteral("label")).toString().toLower();
     if (selected.isEmpty() || label.contains(QStringLiteral("auto"))) selected = url;
   }
+  if (selected.isEmpty()) {
+    selected = absoluteStreamUrl(data.value(QStringLiteral("sources")).toString());
+    if (selected.isEmpty()) selected = absoluteStreamUrl(data.value(QStringLiteral("source")).toString());
+  }
   if (selected.isEmpty()) selected = absoluteStreamUrl(firstString(data, {"directFile", "file", "url", "link"}));
   result.insert(QStringLiteral("mediaUrl"), selected);
   result.insert(QStringLiteral("alternates"), alternates);
 
   QVariantList subtitles;
-  for (const auto &trackValue : data.value(QStringLiteral("tracks")).toArray()) {
-    const auto track = trackValue.toObject();
-    const auto kind = track.value(QStringLiteral("kind")).toString().toLower();
-    if (!kind.isEmpty() && kind != QStringLiteral("captions") && kind != QStringLiteral("subtitles")) continue;
-    const auto url = absoluteStreamUrl(firstString(track, {"file", "url", "src"}));
-    if (url.isEmpty()) continue;
-    QVariantMap item = track.toVariantMap();
-    item.insert(QStringLiteral("url"), url);
-    subtitles.append(item);
+  const auto appendTracks = [&data, &absoluteStreamUrl, &subtitles](const QString &key) {
+    auto tracks = data.value(key).toArray();
+    if (tracks.isEmpty() && data.value(key).isObject()) tracks.append(data.value(key));
+    for (const auto &trackValue : tracks) {
+      const auto track = trackValue.toObject();
+      const auto kind = track.value(QStringLiteral("kind")).toString().toLower();
+      if (!kind.isEmpty() && kind != QStringLiteral("captions") && kind != QStringLiteral("subtitles")) continue;
+      const auto url = absoluteStreamUrl(firstString(track, {"file", "url", "src"}));
+      if (url.isEmpty()) continue;
+      QVariantMap item = track.toVariantMap();
+      item.insert(QStringLiteral("url"), url);
+      subtitles.append(item);
+    }
+  };
+  for (const auto &key : {QStringLiteral("tracks"), QStringLiteral("captions"), QStringLiteral("subtitles")}) {
+    appendTracks(key);
   }
   result.insert(QStringLiteral("subtitles"), subtitles);
   const auto intro = data.value(QStringLiteral("intro")).toObject();
@@ -925,38 +939,60 @@ void ProviderClient::resolveStreamPage(int generation, const QString &episodeId,
 
   getText(streamPage, megaplayHeaders(),
           [this, generation, episodeId, normalizedServer, normalizedAudio, streamPage, fallback]
-          (const QByteArray &body, const QUrl &) {
+          (const QByteArray &body, const QUrl &finalUrl) {
     const auto html = QString::fromUtf8(body);
+    const auto resolvedPage = finalUrl.isValid() ? finalUrl : streamPage;
     auto sourceId = capture(html, QStringLiteral("data-id\\s*=\\s*[\\\"']([A-Za-z0-9_-]+)[\\\"']"));
     if (sourceId.isEmpty())
+      sourceId = capture(html, QStringLiteral("/stream/getSourcesNew\\?id=([A-Za-z0-9_-]+)"));
+    if (sourceId.isEmpty())
       sourceId = capture(html, QStringLiteral("/stream/getSources\\?id=([A-Za-z0-9_-]+)"));
+    if (sourceId.isEmpty())
+      sourceId = capture(resolvedPage.toString(QUrl::FullyEncoded),
+                         QStringLiteral("/stream/s-\\d+/([A-Za-z0-9_-]+)"));
     if (sourceId.isEmpty()) {
       fallback(QStringLiteral("This server has no stream for the selected episode."));
       return;
     }
-    const auto sourcesUrl = providerUrl(MegaplayBaseUrl, QStringLiteral("/stream/getSources"),
-                                         {{QStringLiteral("id"), sourceId}});
-    auto headers = megaplayHeaders(streamPage);
-    headers.append({QByteArrayLiteral("X-Requested-With"), QByteArrayLiteral("XMLHttpRequest")});
-    headers.append({QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain,*/*")});
-    getText(sourcesUrl, headers,
-            [this, generation, episodeId, normalizedServer, normalizedAudio, fallback]
-            (const QByteArray &json, const QUrl &) {
-      const auto document = QJsonDocument::fromJson(json);
-      if (!document.isObject()) {
-        fallback(QStringLiteral("The stream provider returned invalid data."));
-        return;
-      }
-      auto root = document.object();
-      if (root.value(QStringLiteral("data")).isObject()) root = root.value(QStringLiteral("data")).toObject();
-      root.insert(QStringLiteral("server"), normalizedServer);
-      root.insert(QStringLiteral("referer"), QStringLiteral("https://megaplay.buzz/"));
-      const auto stream = streamMap(root, episodeId, normalizedServer, normalizedAudio);
-      if (stream.value(QStringLiteral("mediaUrl")).toString().isEmpty())
+    // The provider replaced the public JSON adapter with getSourcesNew.  Keep the
+    // old endpoint only as a compatibility fallback for a rolling provider deploy.
+    const auto routes = QStringList{QStringLiteral("/stream/getSourcesNew"),
+                                    QStringLiteral("/stream/getSources")};
+    auto trySources = std::make_shared<std::function<void(int)>>();
+    *trySources = [this, generation, episodeId, normalizedServer, normalizedAudio,
+                   resolvedPage, sourceId, fallback, routes, trySources](int index) {
+      const auto sourcesUrl = providerUrl(MegaplayBaseUrl, routes.at(index),
+                                           {{QStringLiteral("id"), sourceId}});
+      auto headers = megaplayHeaders(resolvedPage);
+      headers.append({QByteArrayLiteral("X-Requested-With"), QByteArrayLiteral("XMLHttpRequest")});
+      headers.append({QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain,*/*")});
+      getText(sourcesUrl, headers,
+              [this, generation, episodeId, normalizedServer, normalizedAudio, fallback,
+               routes, trySources, index](const QByteArray &json, const QUrl &) {
+        const auto document = QJsonDocument::fromJson(json);
+        if (!document.isObject()) {
+          if (index + 1 < routes.size()) { (*trySources)(index + 1); return; }
+          fallback(QStringLiteral("The stream provider returned invalid data."));
+          return;
+        }
+        auto root = document.object();
+        if (root.value(QStringLiteral("data")).isObject()) root = root.value(QStringLiteral("data")).toObject();
+        root.insert(QStringLiteral("server"), normalizedServer);
+        root.insert(QStringLiteral("referer"), QStringLiteral("https://megaplay.buzz/"));
+        root.insert(QStringLiteral("origin"), QStringLiteral("https://megaplay.buzz"));
+        const auto stream = streamMap(root, episodeId, normalizedServer, normalizedAudio);
+        if (!stream.value(QStringLiteral("mediaUrl")).toString().isEmpty()) {
+          emit streamResolved(generation, stream);
+          return;
+        }
+        if (index + 1 < routes.size()) { (*trySources)(index + 1); return; }
         fallback(QStringLiteral("This server did not return a playable stream."));
-      else
-        emit streamResolved(generation, stream);
-    }, fallback);
+      }, [fallback, routes, trySources, index](const QString &message) {
+        if (index + 1 < routes.size()) { (*trySources)(index + 1); return; }
+        fallback(message);
+      });
+    };
+    (*trySources)(0);
   }, fallback);
 }
 
