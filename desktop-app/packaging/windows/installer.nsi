@@ -5,7 +5,7 @@ Unicode true
 ${StrLoc}
 
 !define PRODUCT_NAME "AniCloud"
-!define PRODUCT_VERSION "4.1.3"
+!define PRODUCT_VERSION "4.1.4"
 !define PRODUCT_ID "ink.anicloud.desktop"
 
 Name "${PRODUCT_NAME}"
