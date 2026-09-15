@@ -9,8 +9,12 @@ forbidden_suffixes = {".html", ".htm", ".js", ".jsx", ".ts", ".tsx"}
 forbidden_names = {"package.json", "package-lock.json", "anicloud-web.bundle"}
 forbidden_terms = ("qtwebengine", "webview", "vite", "anicloud-web.bundle")
 
+generated_directories = {"out", "build", "vcpkg_installed", ".qt", "release"}
+
 for path in desktop.rglob("*"):
-    if not path.is_file() or "__pycache__" in path.parts:
+    relative_parts = path.relative_to(desktop).parts
+    if (not path.is_file() or "__pycache__" in path.parts or
+            any(part in generated_directories for part in relative_parts)):
         continue
     if path.suffix.lower() in forbidden_suffixes or path.name.lower() in forbidden_names:
         raise SystemExit(f"browser application file in native tree: {path.relative_to(repo)}")

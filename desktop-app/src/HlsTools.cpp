@@ -142,17 +142,10 @@ QString offlineExtension(const QUrl &url, const QString &resourceKind) {
   if (kind == QStringLiteral("map"))
     return sourceExtension == QStringLiteral("m4s") ? QStringLiteral("m4s") : QStringLiteral("mp4");
   if (kind == QStringLiteral("segment")) {
-    static const QSet<QString> mediaExtensions{
-      QStringLiteral("ts"), QStringLiteral("m2ts"), QStringLiteral("mts"),
-      QStringLiteral("m4s"), QStringLiteral("mp4"), QStringLiteral("m4a"),
-      QStringLiteral("aac"), QStringLiteral("mp3"), QStringLiteral("mov"),
-      QStringLiteral("webm"), QStringLiteral("ogg"), QStringLiteral("oga"),
-      QStringLiteral("ogv")
-    };
-    // Several providers deliberately give MPEG-TS segments image, script, or
-    // document suffixes. FFmpeg rejects those names before inspecting their
-    // bytes, so unknown segment suffixes must be exposed as transport streams.
-    return mediaExtensions.contains(sourceExtension) ? sourceExtension : QStringLiteral("ts");
+    // Keep opaque or unusual provider suffixes. HLS demuxing is driven by the
+    // playlist and bytes, not by an assumption that every segment is MPEG-TS.
+    return sourceExtension.isEmpty() || sourceExtension.size() > 8
+      ? QStringLiteral("bin") : sourceExtension;
   }
   return sourceExtension.isEmpty() || sourceExtension.size() > 8
     ? QStringLiteral("bin") : sourceExtension;

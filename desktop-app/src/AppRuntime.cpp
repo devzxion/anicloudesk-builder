@@ -58,7 +58,12 @@ AppRuntime::~AppRuntime() { delete m_trayMenu; }
 
 QString AppRuntime::audioPreference() const { return m_settings.value(QStringLiteral("playback/audio"), QStringLiteral("sub")).toString(); }
 QString AppRuntime::playbackQuality() const { return m_settings.value(QStringLiteral("playback/quality"), QStringLiteral("auto")).toString(); }
-QString AppRuntime::serverPreference() const { return m_settings.value(QStringLiteral("playback/server"), QStringLiteral("hd-2")).toString(); }
+QString AppRuntime::serverPreference() const {
+  const auto value = m_settings.value(QStringLiteral("playback/server"), QStringLiteral("hd-2")).toString();
+  return value == QStringLiteral("hd-1") || value == QStringLiteral("hd-2") ||
+         value == QStringLiteral("hd-3") || value == QStringLiteral("hd-4")
+    ? value : QStringLiteral("hd-2");
+}
 double AppRuntime::captionScale() const { return qBound(0.75, m_settings.value(QStringLiteral("captions/scale"), 1.0).toDouble(), 1.5); }
 QString AppRuntime::captionColor() const {
   const QColor color(m_settings.value(QStringLiteral("captions/color"), QStringLiteral("#FFFFFF")).toString());
@@ -84,7 +89,11 @@ void AppRuntime::setRoute(const QString &route) {
 void AppRuntime::setAudioPreference(const QString &value) { m_settings.setValue(QStringLiteral("playback/audio"), value); emit preferencesChanged(); }
 void AppRuntime::setPlaybackQuality(const QString &value) { m_settings.setValue(QStringLiteral("playback/quality"), value); emit preferencesChanged(); }
 void AppRuntime::setServerPreference(const QString &value) {
-  m_settings.setValue(QStringLiteral("playback/server"), value == QStringLiteral("hd-1") ? QStringLiteral("hd-1") : QStringLiteral("hd-2"));
+  const auto normalized = value.trimmed().toLower();
+  m_settings.setValue(QStringLiteral("playback/server"),
+    normalized == QStringLiteral("hd-1") || normalized == QStringLiteral("hd-2") ||
+    normalized == QStringLiteral("hd-3") || normalized == QStringLiteral("hd-4")
+      ? normalized : QStringLiteral("hd-2"));
   emit preferencesChanged();
 }
 void AppRuntime::setCaptionScale(double value) {

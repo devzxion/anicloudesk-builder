@@ -111,9 +111,10 @@ Flickable {
                         Layout.fillWidth: true; Layout.preferredHeight: 42
                         Text { text: "Default server"; color: Theme.text; Layout.fillWidth: true }
                         ComboBox {
-                            Layout.preferredWidth: 158; model: ["HD2", "HD1"]
-                            currentIndex: Runtime.serverPreference === "hd-1" ? 1 : 0
-                            onActivated: Runtime.serverPreference = currentIndex === 1 ? "hd-1" : "hd-2"
+                            property var serverValues: ["hd-2", "hd-1", "hd-3", "hd-4"]
+                            Layout.preferredWidth: 158; model: ["HD2", "HD1", "HD3", "HD4"]
+                            currentIndex: Math.max(0, serverValues.indexOf(Runtime.serverPreference))
+                            onActivated: Runtime.serverPreference = serverValues[currentIndex]
                             Accessible.name: "Default playback server"
                         }
                     }

@@ -3,14 +3,25 @@
 #include "ApiClient.h"
 #include "HlsGateway.h"
 #include "HlsTools.h"
+#include "ProviderCrypto.h"
+#include "ProviderRules.h"
 
 #include <QFile>
 #include <QFileInfo>
+#include <QDateTime>
 #include <QMediaMetaData>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSettings>
 #include <QUrl>
+
+namespace {
+bool supportedServer(const QString &server) {
+  return server == QStringLiteral("hd-1") || server == QStringLiteral("hd-2") ||
+         server == QStringLiteral("hd-3") || server == QStringLiteral("hd-4");
+}
+
+}
 
 PlayerController::PlayerController(ProviderClient *provider, AccountClient *account, HlsGateway *gateway, QObject *parent)
   : QObject(parent), m_provider(provider), m_account(account), m_gateway(gateway) {
@@ -58,7 +69,25 @@ PlayerController::PlayerController(ProviderClient *provider, AccountClient *acco
   connect(&m_player, &QMediaPlayer::errorOccurred, this, [this](QMediaPlayer::Error, const QString &message) { scheduleFailure(message); });
   connect(&m_player, &QMediaPlayer::tracksChanged, this, &PlayerController::refreshTracks);
   connect(m_provider, &ProviderClient::streamResolved, this, &PlayerController::applyStream);
+  connect(m_provider, &ProviderClient::streamResolved, this,
+          [this](int generation, const QVariantMap &stream) {
+    if (generation != m_captionFallbackGeneration) return;
+    m_captionFallbackGeneration = 0;
+    if (m_audioMode != QStringLiteral("dub") || m_current.isEmpty()) return;
+    const auto captions = stream.value(QStringLiteral("subtitles")).toList();
+    if (captions.isEmpty()) return;
+    m_stream.insert(QStringLiteral("subtitles"), captions);
+    m_captions = captions;
+    emit captionsChanged();
+    if (m_captionsEnabled)
+      loadCaption(qBound(0, m_selectedCaptionIndex < 0 ? 0 : m_selectedCaptionIndex,
+                         static_cast<int>(m_captions.size()) - 1));
+  });
   connect(m_provider, &ProviderClient::streamFailed, this, [this](int generation, const QString &message) {
+    if (generation == m_captionFallbackGeneration) {
+      m_captionFallbackGeneration = 0;
+      return;
+    }
     if (generation == m_generation) failOrFallback(message);
   });
 
@@ -117,6 +146,7 @@ void PlayerController::open(const QVariantMap &episode, qint64 resumeMillisecond
   m_sessionId.clear();
   m_stream.clear();
   m_captions.clear();
+  m_captionFallbackGeneration = 0;
   cancelCaptionRequest();
   m_selectedCaptionIndex = -1;
   m_subtitleCues.clear();
@@ -128,11 +158,12 @@ void PlayerController::open(const QVariantMap &episode, qint64 resumeMillisecond
   if (!m_current.contains(QStringLiteral("episodeName"))) m_current.insert(QStringLiteral("episodeName"), episode.value(QStringLiteral("title"), QStringLiteral("Episode %1").arg(episode.value(QStringLiteral("number")).toInt())));
   m_server = episode.value(QStringLiteral("server"),
                            QSettings().value(QStringLiteral("playback/server"), QStringLiteral("hd-2"))).toString();
-  if (m_server != QStringLiteral("hd-1")) m_server = QStringLiteral("hd-2");
+  if (!supportedServer(m_server)) m_server = QStringLiteral("hd-2");
   m_audioMode = episode.value(QStringLiteral("audioMode"), QStringLiteral("sub")).toString();
   m_restorePosition = resumeMilliseconds;
   m_restorePlaying = true;
-  m_triedSecondaryServer = false;
+  m_serverFallbackOrder = providerFallbackOrder(m_server);
+  m_serverFallbackIndex = 0;
   m_alternateIndex = -1;
   emit currentChanged();
   m_provider->loadServers(m_current.value(QStringLiteral("episodeId"), m_current.value(QStringLiteral("id"))).toString());
@@ -147,6 +178,7 @@ void PlayerController::openOffline(const QVariantMap &download) {
   if (!QFileInfo::exists(path)) { setError(QStringLiteral("The offline library is missing its playlist.")); setState(QStringLiteral("error")); return; }
   m_restoreSpeed = speed();
   m_restoreCaptionIndex = m_player.activeSubtitleTrack();
+  m_captionFallbackGeneration = 0;
   saveProgress();
   m_player.stop();
   cancelCaptionRequest();
@@ -170,6 +202,7 @@ void PlayerController::resolve(bool preserveState) {
     m_restorePosition = position(); m_restorePlaying = playing(); m_restoreSpeed = speed();
     m_restoreCaptionIndex = m_player.activeSubtitleTrack();
   }
+  m_captionFallbackGeneration = 0;
   setError({}); setState(QStringLiteral("resolving")); ++m_generation; m_alternateIndex = -1; m_bufferRetries = 0;
   m_lastProgressPosition = 0;
   m_provider->resolveStream(m_generation, m_current.value(QStringLiteral("episodeId"), m_current.value(QStringLiteral("id"))).toString(), m_server, m_audioMode);
@@ -179,7 +212,7 @@ void PlayerController::applyStream(int generation, const QVariantMap &stream) {
   if (generation != m_generation) return;
   m_stream = stream;
   const auto resolvedServer = stream.value(QStringLiteral("server")).toString();
-  if (resolvedServer == QStringLiteral("hd-1") || resolvedServer == QStringLiteral("hd-2")) {
+  if (supportedServer(resolvedServer)) {
     m_server = resolvedServer;
     m_current.insert(QStringLiteral("server"), resolvedServer);
   }
@@ -203,6 +236,12 @@ void PlayerController::applyStream(int generation, const QVariantMap &stream) {
     setCaptionStatus(QStringLiteral("off"));
   }
   loadStream(m_stream);
+  if (m_audioMode == QStringLiteral("dub") && m_captions.isEmpty()) {
+    m_captionFallbackGeneration = -generation;
+    m_provider->resolveStream(m_captionFallbackGeneration,
+      m_current.value(QStringLiteral("episodeId"), m_current.value(QStringLiteral("id"))).toString(),
+      m_server, QStringLiteral("sub"));
+  }
 }
 
 void PlayerController::loadStream(const QVariantMap &stream) {
@@ -252,9 +291,8 @@ void PlayerController::failOrFallback(const QString &message) {
       alternate.insert(QStringLiteral("mediaUrl"), url); m_stream = alternate; loadStream(m_stream); return;
     }
   }
-  if (!m_triedSecondaryServer) {
-    m_triedSecondaryServer = true;
-    m_server = m_server == QStringLiteral("hd-2") ? QStringLiteral("hd-1") : QStringLiteral("hd-2");
+  if (m_serverFallbackIndex + 1 < m_serverFallbackOrder.size()) {
+    m_server = m_serverFallbackOrder.at(++m_serverFallbackIndex);
     m_current.insert(QStringLiteral("server"), m_server); emit currentChanged();
     if (m_restorePosition <= 0) m_restorePosition = position();
     m_restoreSpeed = speed(); m_restoreCaptionIndex = m_player.activeSubtitleTrack();
@@ -413,12 +451,24 @@ void PlayerController::fetchNextCaptionResource(int generation) {
     return;
   }
 
-  QNetworkRequest request(url);
+  const QUrl effectiveUrl(ProviderCrypto::refreshSignedUrl(
+    url.toString(QUrl::FullyEncoded),
+    m_stream.value(QStringLiteral("tokenSigningKey")).toString().toUtf8(),
+    QDateTime::currentSecsSinceEpoch(),
+    m_stream.value(QStringLiteral("tokenLifetimeSeconds"), 90).toInt(),
+    m_stream.value(QStringLiteral("tokenRefreshLeadSeconds"), 30).toInt()));
+  QNetworkRequest request(effectiveUrl);
   request.setTransferTimeout(20'000);
   request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
   const auto headers = m_stream.value(QStringLiteral("headers")).toMap();
   for (auto it = headers.cbegin(); it != headers.cend(); ++it)
     request.setRawHeader(it.key().toUtf8(), it.value().toString().toUtf8());
+  if (m_selectedCaptionIndex >= 0 && m_selectedCaptionIndex < m_captions.size()) {
+    const auto trackHeaders = m_captions.at(m_selectedCaptionIndex).toMap()
+                                .value(QStringLiteral("headers")).toMap();
+    for (auto it = trackHeaders.cbegin(); it != trackHeaders.cend(); ++it)
+      request.setRawHeader(it.key().toUtf8(), it.value().toString().toUtf8());
+  }
   const auto referer = m_stream.value(QStringLiteral("referer")).toString();
   if (!referer.isEmpty()) request.setRawHeader(QByteArrayLiteral("Referer"), referer.toUtf8());
   request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("text/vtt,text/plain,application/vnd.apple.mpegurl,*/*"));
@@ -469,14 +519,16 @@ void PlayerController::refreshTracks() {
 
 void PlayerController::switchServer(const QString &server) {
   if (m_offlinePlayback) return;
-  const auto normalized = server == QStringLiteral("hd-1") ? QStringLiteral("hd-1") : QStringLiteral("hd-2");
+  const auto candidate = server.trimmed().toLower();
+  const auto normalized = supportedServer(candidate) ? candidate : QStringLiteral("hd-2");
   QSettings().setValue(QStringLiteral("playback/server"), normalized);
   if (normalized == m_server) return;
-  m_server = normalized; m_current.insert(QStringLiteral("server"), normalized); emit currentChanged(); m_triedSecondaryServer = false; resolve(true);
+  m_server = normalized; m_current.insert(QStringLiteral("server"), normalized); emit currentChanged();
+  m_serverFallbackOrder = providerFallbackOrder(normalized); m_serverFallbackIndex = 0; resolve(true);
 }
-void PlayerController::switchAudio(const QString &audioMode) { if (m_offlinePlayback || audioMode == m_audioMode) return; m_audioMode = audioMode; m_current.insert(QStringLiteral("audioMode"), audioMode); emit currentChanged(); m_triedSecondaryServer = false; resolve(true); }
+void PlayerController::switchAudio(const QString &audioMode) { if (m_offlinePlayback || audioMode == m_audioMode) return; m_audioMode = audioMode; m_current.insert(QStringLiteral("audioMode"), audioMode); emit currentChanged(); m_serverFallbackOrder = providerFallbackOrder(m_server); m_serverFallbackIndex = 0; resolve(true); }
 void PlayerController::retry() {
-  m_triedSecondaryServer = false;
+  m_serverFallbackOrder = providerFallbackOrder(m_server); m_serverFallbackIndex = 0;
   if (m_offlinePlayback) { m_restorePosition = position(); loadOfflineStream(); }
   else resolve(m_state != QStringLiteral("error"));
 }

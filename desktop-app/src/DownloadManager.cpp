@@ -4,9 +4,11 @@
 #include "Database.h"
 #include "DownloadRetryPolicy.h"
 #include "HlsTools.h"
+#include "ProviderCrypto.h"
 
 #include <QAbstractSocket>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -40,6 +42,9 @@ struct DownloadManager::Job {
   QString id;
   QVariantMap record;
   QVariantMap headers;
+  QByteArray tokenSigningKey;
+  int tokenLifetimeSeconds = 90;
+  int tokenRefreshLeadSeconds = 30;
   QString root;
   int preferredHeight = 1080;
   QList<Resource> queued;
@@ -105,19 +110,47 @@ DownloadManager::DownloadManager(Database *database, AccountClient *account, Pro
   m_storageRoot = settings.value(QStringLiteral("downloads/storageRoot"), database->libraryRoot()).toString();
   QDir().mkpath(m_storageRoot);
   connect(m_provider, &ProviderClient::streamResolved, this, [this](int generation, const QVariantMap &stream) {
+    if (m_pendingCaptionStreams.contains(generation)) {
+      auto episode = m_pendingCaptionStreams.take(generation);
+      auto resolved = episode.take(QStringLiteral("_resolvedStream")).toMap();
+      const auto captions = stream.value(QStringLiteral("subtitles")).toList();
+      if (!captions.isEmpty()) resolved.insert(QStringLiteral("subtitles"), captions);
+      enqueue(episode, resolved, episode.value(QStringLiteral("preferredHeight"), 1080).toInt());
+      emit preparingChanged();
+      return;
+    }
     if (!m_pendingEpisodes.contains(generation)) return;
-    const auto episode = m_pendingEpisodes.take(generation);
+    auto episode = m_pendingEpisodes.take(generation);
+    if (episode.value(QStringLiteral("audioMode")).toString() == QStringLiteral("dub") &&
+        stream.value(QStringLiteral("subtitles")).toList().isEmpty()) {
+      episode.insert(QStringLiteral("_resolvedStream"), stream);
+      const int captionGeneration = ++m_resolveGeneration;
+      m_pendingCaptionStreams.insert(captionGeneration, episode);
+      m_provider->resolveStream(captionGeneration,
+        episode.value(QStringLiteral("episodeId"), episode.value(QStringLiteral("id"))).toString(),
+        stream.value(QStringLiteral("server"), episode.value(QStringLiteral("server"), QStringLiteral("hd-2"))).toString(),
+        QStringLiteral("sub"));
+      return;
+    }
     enqueue(episode, stream, episode.value(QStringLiteral("preferredHeight"), 1080).toInt());
     emit preparingChanged();
   });
   connect(m_provider, &ProviderClient::streamFailed, this, [this](int generation, const QString &message) {
-    if (m_pendingEpisodes.remove(generation) > 0) { setError(message); emit preparingChanged(); }
+    if (m_pendingCaptionStreams.contains(generation)) {
+      auto episode = m_pendingCaptionStreams.take(generation);
+      const auto stream = episode.take(QStringLiteral("_resolvedStream")).toMap();
+      enqueue(episode, stream, episode.value(QStringLiteral("preferredHeight"), 1080).toInt());
+      emit preparingChanged();
+      return;
+    }
+    if (m_pendingEpisodes.remove(generation)) { setError(message); emit preparingChanged(); }
   });
   connect(m_account, &AccountClient::authenticationChanged, this, [this] {
     if (!m_account->authenticated()) {
       const auto ids = m_jobs.keys();
       for (const auto &id : ids) pause(id);
       m_pendingEpisodes.clear();
+      m_pendingCaptionStreams.clear();
       emit preparingChanged();
     }
     reload();
@@ -227,6 +260,17 @@ QVariantMap DownloadManager::episodeStatus(const QString &animeId, const QString
       return value;
     }
   }
+  for (auto it = m_pendingCaptionStreams.cbegin(); it != m_pendingCaptionStreams.cend(); ++it) {
+    const auto pending = it.value();
+    if (pending.value(QStringLiteral("animeId")).toString() == animeId &&
+        pending.value(QStringLiteral("episodeId"), pending.value(QStringLiteral("id"))).toString() == episodeId) {
+      auto value = pending;
+      value.remove(QStringLiteral("_resolvedStream"));
+      value.insert(QStringLiteral("state"), QStringLiteral("preparing"));
+      value.insert(QStringLiteral("progress"), 0.0);
+      return value;
+    }
+  }
   for (const auto &value : m_items) {
     const auto record = value.toMap();
     if (record.value(QStringLiteral("animeId")).toString() == animeId &&
@@ -247,6 +291,9 @@ QString DownloadManager::enqueue(const QVariantMap &episode, const QVariantMap &
   job->id = QUuid::createUuid().toString(QUuid::WithoutBraces);
   job->root = m_storageRoot + QLatin1Char('/') + job->id;
   job->headers = stream.value(QStringLiteral("headers")).toMap();
+  job->tokenSigningKey = stream.value(QStringLiteral("tokenSigningKey")).toString().toUtf8();
+  job->tokenLifetimeSeconds = stream.value(QStringLiteral("tokenLifetimeSeconds"), 90).toInt();
+  job->tokenRefreshLeadSeconds = stream.value(QStringLiteral("tokenRefreshLeadSeconds"), 30).toInt();
   if (!stream.value(QStringLiteral("referer")).toString().isEmpty()) job->headers.insert(QStringLiteral("Referer"), stream.value(QStringLiteral("referer")));
   job->preferredHeight = qBound(144, preferredHeight, 4320);
   job->record = episode;
@@ -260,6 +307,9 @@ QString DownloadManager::enqueue(const QVariantMap &episode, const QVariantMap &
   job->record.insert(QStringLiteral("ownerId"), m_account->user().value(QStringLiteral("id")).toString());
   job->record.insert(QStringLiteral("mediaUrl"), media.toString(QUrl::FullyEncoded));
   job->record.insert(QStringLiteral("headers"), job->headers);
+  job->record.insert(QStringLiteral("tokenSigningKey"), QString::fromUtf8(job->tokenSigningKey));
+  job->record.insert(QStringLiteral("tokenLifetimeSeconds"), job->tokenLifetimeSeconds);
+  job->record.insert(QStringLiteral("tokenRefreshLeadSeconds"), job->tokenRefreshLeadSeconds);
   job->record.insert(QStringLiteral("subtitles"), stream.value(QStringLiteral("subtitles")));
   job->record.insert(QStringLiteral("introStart"), stream.value(QStringLiteral("introStart")));
   job->record.insert(QStringLiteral("introEnd"), stream.value(QStringLiteral("introEnd")));
@@ -328,7 +378,11 @@ void DownloadManager::start(Job *job) {
 }
 
 void DownloadManager::fetchManifest(Job *job, const QUrl &url, bool selectVariant, int attempt) {
-  QNetworkRequest request(url); request.setTransferTimeout(30'000);
+  const QUrl effectiveUrl(ProviderCrypto::refreshSignedUrl(
+    url.toString(QUrl::FullyEncoded), job->tokenSigningKey,
+    QDateTime::currentSecsSinceEpoch(), job->tokenLifetimeSeconds,
+    job->tokenRefreshLeadSeconds));
+  QNetworkRequest request(effectiveUrl); request.setTransferTimeout(30'000);
   request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
   for (auto it = job->headers.cbegin(); it != job->headers.cend(); ++it) request.setRawHeader(it.key().toUtf8(), it.value().toString().toUtf8());
   auto *reply = m_network.get(request);
@@ -464,7 +518,10 @@ void DownloadManager::fetchResource(Job *job, const Resource &resource) {
                                 HlsTools::looksLikePlaylist({}, resource.url);
   if (!resource.byteRange.isEmpty() || playlistResource) QFile::remove(partPath);
   const auto existing = QFileInfo(partPath).size();
-  auto routedUrl = resource.url;
+  auto routedUrl = QUrl(ProviderCrypto::refreshSignedUrl(
+    resource.url.toString(QUrl::FullyEncoded), job->tokenSigningKey,
+    QDateTime::currentSecsSinceEpoch(), job->tokenLifetimeSeconds,
+    job->tokenRefreshLeadSeconds));
   const auto publicAddress = m_publicAddresses.value(resource.url.host());
   if (!publicAddress.isEmpty()) routedUrl.setHost(publicAddress);
   QNetworkRequest request(routedUrl); request.setTransferTimeout(45'000);
@@ -687,7 +744,11 @@ void DownloadManager::retry(const QString &id) {
   for (const auto &value : m_database->downloads(m_account->user().value(QStringLiteral("id")).toString())) {
     const auto record = value.toMap(); if (record.value(QStringLiteral("id")).toString() != id) continue;
     auto *job = new Job; job->id = id; job->record = record; job->root = record.value(QStringLiteral("rootPath")).toString();
-    job->headers = record.value(QStringLiteral("headers")).toMap(); job->preferredHeight = record.value(QStringLiteral("qualityHeight"), 1080).toInt();
+    job->headers = record.value(QStringLiteral("headers")).toMap();
+    job->tokenSigningKey = record.value(QStringLiteral("tokenSigningKey")).toString().toUtf8();
+    job->tokenLifetimeSeconds = record.value(QStringLiteral("tokenLifetimeSeconds"), 90).toInt();
+    job->tokenRefreshLeadSeconds = record.value(QStringLiteral("tokenRefreshLeadSeconds"), 30).toInt();
+    job->preferredHeight = record.value(QStringLiteral("qualityHeight"), 1080).toInt();
     m_jobs.insert(id, job); start(job); return;
   }
 }

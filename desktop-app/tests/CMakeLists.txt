@@ -27,9 +27,10 @@ qt_add_executable(anicloud_hls_gateway_tests
   test_hlsgateway.cpp
   ../src/HlsGateway.cpp
   ../src/HlsTools.cpp
+  ../src/ProviderCrypto.cpp
 )
 target_include_directories(anicloud_hls_gateway_tests PRIVATE ../src)
-target_link_libraries(anicloud_hls_gateway_tests PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+target_link_libraries(anicloud_hls_gateway_tests PRIVATE Qt6::Core Qt6::Network Qt6::Test unofficial-sodium::sodium OpenSSL::Crypto)
 add_test(NAME hls_loopback_gateway COMMAND anicloud_hls_gateway_tests)
 
 qt_add_executable(anicloud_update_tests
@@ -62,14 +63,45 @@ add_test(NAME sqlite_encryption_and_owner_isolation COMMAND anicloud_persistence
 qt_add_executable(anicloud_api_mapping_tests
   test_api_mapping.cpp
   ../src/ApiClient.cpp
+  ../src/ProviderCrypto.cpp
+  ../src/ProviderRules.cpp
+  ../src/ProviderPatchManager.cpp
   ../src/Database.cpp
   ../src/SecureStore.cpp
 )
 target_include_directories(anicloud_api_mapping_tests PRIVATE ../src "${CMAKE_CURRENT_BINARY_DIR}/../generated")
+target_compile_definitions(anicloud_api_mapping_tests PRIVATE ANICLOUD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 target_link_libraries(anicloud_api_mapping_tests PRIVATE
-  Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql Qt6::Test unofficial-sodium::sodium ${ANICLOUD_QTKEYCHAIN_TARGET}
+  Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql Qt6::Test unofficial-sodium::sodium OpenSSL::Crypto ${ANICLOUD_QTKEYCHAIN_TARGET}
 )
 add_test(NAME provider_dto_mapping COMMAND anicloud_api_mapping_tests)
+
+qt_add_executable(anicloud_provider_crypto_tests
+  test_providercrypto.cpp
+  ../src/ProviderCrypto.cpp
+  ../src/ProviderRules.cpp
+  ../src/ProviderPatchManager.cpp
+)
+target_include_directories(anicloud_provider_crypto_tests PRIVATE ../src "${CMAKE_CURRENT_BINARY_DIR}/../generated")
+target_compile_definitions(anicloud_provider_crypto_tests PRIVATE ANICLOUD_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+target_link_libraries(anicloud_provider_crypto_tests PRIVATE
+  Qt6::Core Qt6::Network Qt6::Test unofficial-sodium::sodium OpenSSL::Crypto
+)
+add_test(NAME encrypted_provider_sources COMMAND anicloud_provider_crypto_tests)
+
+qt_add_executable(anicloud_provider_live_smoke
+  provider_live_smoke.cpp
+  ../src/ApiClient.cpp
+  ../src/ProviderCrypto.cpp
+  ../src/ProviderRules.cpp
+  ../src/ProviderPatchManager.cpp
+  ../src/Database.cpp
+  ../src/SecureStore.cpp
+)
+target_include_directories(anicloud_provider_live_smoke PRIVATE ../src "${CMAKE_CURRENT_BINARY_DIR}/../generated")
+target_link_libraries(anicloud_provider_live_smoke PRIVATE
+  Qt6::Core Qt6::Gui Qt6::Network Qt6::Sql unofficial-sodium::sodium OpenSSL::Crypto ${ANICLOUD_QTKEYCHAIN_TARGET}
+)
 
 qt_add_executable(anicloud_quick_tests quicktest_main.cpp)
 target_compile_definitions(anicloud_quick_tests PRIVATE QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml")

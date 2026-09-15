@@ -2,8 +2,11 @@
 
 #include "BuildConfig.h"
 #include "Database.h"
+#include "ProviderCrypto.h"
 #include "SecureStore.h"
 
+#include <QByteArray>
+#include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMap>
@@ -15,6 +18,8 @@
 #include <QUrlQuery>
 #include <QUuid>
 #include <QSet>
+#include <QStringList>
+#include <QTimer>
 #include <initializer_list>
 #include <memory>
 #include <utility>
@@ -25,7 +30,12 @@ const QByteArray ProviderUserAgent(
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
   "(KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36");
 const QString MalBaseUrl = QStringLiteral("https://myanimelist.net");
-const QString MegaplayBaseUrl = QStringLiteral("https://megaplay.buzz");
+const QString AniListGraphqlUrl = QStringLiteral("https://graphql.anilist.co");
+
+bool supportedServer(const QString &server) {
+  return server == QStringLiteral("hd-1") || server == QStringLiteral("hd-2") ||
+         server == QStringLiteral("hd-3") || server == QStringLiteral("hd-4");
+}
 
 QRegularExpression rx(const QString &pattern) {
   return QRegularExpression(pattern, QRegularExpression::CaseInsensitiveOption |
@@ -153,15 +163,25 @@ QList<QPair<QByteArray, QByteArray>> malHeaders() {
   };
 }
 
-QList<QPair<QByteArray, QByteArray>> megaplayHeaders(const QUrl &referer = {}) {
+QList<QPair<QByteArray, QByteArray>> providerHeaders(const QString &base,
+                                                     const QUrl &referer = {}) {
   QList<QPair<QByteArray, QByteArray>> headers{
     {QByteArrayLiteral("User-Agent"), ProviderUserAgent},
     {QByteArrayLiteral("Accept-Language"), QByteArrayLiteral("en-US,en;q=0.9")},
-    {QByteArrayLiteral("Origin"), QByteArrayLiteral("https://megaplay.buzz")},
+    {QByteArrayLiteral("Origin"), base.toUtf8()},
     {QByteArrayLiteral("Referer"), referer.isValid() ? referer.toString().toUtf8()
-                                                     : QByteArrayLiteral("https://megaplay.buzz/")},
+                                                     : (base + QLatin1Char('/')).toUtf8()},
   };
   return headers;
+}
+
+QJsonObject decodeZokoConfig(const QString &page, const QByteArray &key) {
+  auto normalized = page;
+  normalized.replace(QStringLiteral("\\/"), QStringLiteral("/"));
+  const auto blob = capture(normalized,
+    QStringLiteral("window\\.__P\\s*=\\s*[\\\"']([A-Za-z0-9+/=_-]+)[\\\"']"));
+  if (blob.isEmpty()) return {};
+  return ProviderCrypto::decodeXorPayload(blob, key);
 }
 
 QString firstString(const QJsonObject &value, std::initializer_list<const char *> keys) {
@@ -179,6 +199,16 @@ int firstInt(const QJsonObject &value, std::initializer_list<const char *> keys)
     if (candidate.isString()) return candidate.toString().toInt();
   }
   return 0;
+}
+
+QString providerSource(const QJsonValue &value, const QString &fileField) {
+  if (value.isString()) return value.toString().trimmed();
+  if (value.isObject()) return value.toObject().value(fileField).toString().trimmed();
+  for (const auto &entry : value.toArray()) {
+    const auto candidate = entry.toObject().value(fileField).toString().trimmed();
+    if (!candidate.isEmpty()) return candidate;
+  }
+  return {};
 }
 
 QVariantMap card(const QJsonObject &value) {
@@ -222,7 +252,9 @@ QString networkMessage(QNetworkReply *reply, const QJsonObject &root) {
 }
 }
 
-ProviderClient::ProviderClient(QObject *parent) : QObject(parent) {}
+ProviderClient::ProviderClient(QObject *parent) : QObject(parent), m_patches() {
+  QTimer::singleShot(0, &m_patches, &ProviderPatchManager::refresh);
+}
 
 void ProviderClient::setError(const QString &error) {
   if (m_error == error) return;
@@ -822,10 +854,14 @@ void ProviderClient::loadServers(const QString &episodeId) {
   m_subServers = {
     QVariantMap{{QStringLiteral("index"), 0}, {QStringLiteral("type"), QStringLiteral("sub")}, {QStringLiteral("id"), 1}, {QStringLiteral("name"), QStringLiteral("hd-1")}},
     QVariantMap{{QStringLiteral("index"), 1}, {QStringLiteral("type"), QStringLiteral("sub")}, {QStringLiteral("id"), 2}, {QStringLiteral("name"), QStringLiteral("hd-2")}},
+    QVariantMap{{QStringLiteral("index"), 2}, {QStringLiteral("type"), QStringLiteral("sub")}, {QStringLiteral("id"), 3}, {QStringLiteral("name"), QStringLiteral("hd-3")}},
+    QVariantMap{{QStringLiteral("index"), 3}, {QStringLiteral("type"), QStringLiteral("sub")}, {QStringLiteral("id"), 4}, {QStringLiteral("name"), QStringLiteral("hd-4")}},
   };
   m_dubServers = {
     QVariantMap{{QStringLiteral("index"), 0}, {QStringLiteral("type"), QStringLiteral("dub")}, {QStringLiteral("id"), 1}, {QStringLiteral("name"), QStringLiteral("hd-1")}},
     QVariantMap{{QStringLiteral("index"), 1}, {QStringLiteral("type"), QStringLiteral("dub")}, {QStringLiteral("id"), 2}, {QStringLiteral("name"), QStringLiteral("hd-2")}},
+    QVariantMap{{QStringLiteral("index"), 2}, {QStringLiteral("type"), QStringLiteral("dub")}, {QStringLiteral("id"), 3}, {QStringLiteral("name"), QStringLiteral("hd-3")}},
+    QVariantMap{{QStringLiteral("index"), 3}, {QStringLiteral("type"), QStringLiteral("dub")}, {QStringLiteral("id"), 4}, {QStringLiteral("name"), QStringLiteral("hd-4")}},
   };
   emit serversChanged();
 }
@@ -838,19 +874,27 @@ QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &ep
   result.insert(QStringLiteral("episodeId"), episodeId);
   result.insert(QStringLiteral("server"), firstString(data, {"server"}).isEmpty() ? server : firstString(data, {"server"}));
   result.insert(QStringLiteral("audioMode"), audioMode);
+  result.insert(QStringLiteral("tokenSigningKey"), data.value(QStringLiteral("tokenSigningKey")).toString());
+  result.insert(QStringLiteral("tokenLifetimeSeconds"), data.value(QStringLiteral("tokenLifetimeSeconds")).toInt(90));
+  result.insert(QStringLiteral("tokenRefreshLeadSeconds"), data.value(QStringLiteral("tokenRefreshLeadSeconds")).toInt(30));
   const auto referer = firstString(data, {"Referer", "referer", "referrer"});
   result.insert(QStringLiteral("referer"), referer);
-  const auto streamBase = QUrl(referer.isEmpty() ? MegaplayBaseUrl + QLatin1Char('/') : referer);
+  const auto streamBase = QUrl(referer.isEmpty() ? QStringLiteral("https://megaplay.buzz/") : referer);
   const auto absoluteStreamUrl = [&streamBase](const QString &value) {
     if (value.trimmed().isEmpty()) return QString{};
     const QUrl candidate(value);
     return (candidate.isRelative() ? streamBase.resolved(candidate) : candidate).toString(QUrl::FullyEncoded);
   };
-  QVariantMap headers = data.value(QStringLiteral("headers")).toObject().toVariantMap();
+  QVariantMap headers;
   if (!referer.isEmpty()) headers.insert(QStringLiteral("Referer"), referer);
   const auto origin = firstString(data, {"Origin", "origin"});
   if (!origin.isEmpty()) headers.insert(QStringLiteral("Origin"), origin);
   headers.insert(QStringLiteral("User-Agent"), QString::fromUtf8(ProviderUserAgent));
+  // Signed rules are applied last so a provider can rotate required media
+  // headers without a desktop release, matching the Android resolver.
+  const auto patchedHeaders = data.value(QStringLiteral("headers")).toObject().toVariantMap();
+  for (auto it = patchedHeaders.cbegin(); it != patchedHeaders.cend(); ++it)
+    headers.insert(it.key(), it.value());
   result.insert(QStringLiteral("headers"), headers);
 
   auto sources = data.value(QStringLiteral("sources")).toArray();
@@ -873,12 +917,12 @@ QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &ep
     selected = absoluteStreamUrl(data.value(QStringLiteral("sources")).toString());
     if (selected.isEmpty()) selected = absoluteStreamUrl(data.value(QStringLiteral("source")).toString());
   }
-  if (selected.isEmpty()) selected = absoluteStreamUrl(firstString(data, {"directFile", "file", "url", "link"}));
+  if (selected.isEmpty()) selected = absoluteStreamUrl(firstString(data, {"directFile", "file", "url", "link", "src"}));
   result.insert(QStringLiteral("mediaUrl"), selected);
   result.insert(QStringLiteral("alternates"), alternates);
 
   QVariantList subtitles;
-  const auto appendTracks = [&data, &absoluteStreamUrl, &subtitles](const QString &key) {
+  const auto appendTracks = [&data, &absoluteStreamUrl, &subtitles, &headers](const QString &key) {
     auto tracks = data.value(key).toArray();
     if (tracks.isEmpty() && data.value(key).isObject()) tracks.append(data.value(key));
     for (const auto &trackValue : tracks) {
@@ -889,6 +933,7 @@ QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &ep
       if (url.isEmpty()) continue;
       QVariantMap item = track.toVariantMap();
       item.insert(QStringLiteral("url"), url);
+      item.insert(QStringLiteral("headers"), headers);
       subtitles.append(item);
     }
   };
@@ -896,8 +941,11 @@ QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &ep
     appendTracks(key);
   }
   result.insert(QStringLiteral("subtitles"), subtitles);
-  const auto intro = data.value(QStringLiteral("intro")).toObject();
-  const auto outro = data.value(QStringLiteral("outro")).toObject();
+  const auto skip = data.value(QStringLiteral("skip")).toObject();
+  const auto intro = skip.value(QStringLiteral("intro")).isObject()
+    ? skip.value(QStringLiteral("intro")).toObject() : data.value(QStringLiteral("intro")).toObject();
+  const auto outro = skip.value(QStringLiteral("outro")).isObject()
+    ? skip.value(QStringLiteral("outro")).toObject() : data.value(QStringLiteral("outro")).toObject();
   result.insert(QStringLiteral("introStart"), firstInt(intro, {"start"}));
   result.insert(QStringLiteral("introEnd"), firstInt(intro, {"end"}));
   result.insert(QStringLiteral("outroStart"), firstInt(outro, {"start"}));
@@ -907,12 +955,12 @@ QVariantMap ProviderClient::streamMap(const QJsonObject &root, const QString &ep
 
 void ProviderClient::resolveStream(int generation, const QString &episodeId,
                                    const QString &server, const QString &audioMode) {
-  resolveStreamPage(generation, episodeId, server, audioMode, true);
+  resolveStreamPage(generation, episodeId, server, audioMode, m_patches.activeRules());
 }
 
 void ProviderClient::resolveStreamPage(int generation, const QString &episodeId,
                                        const QString &server, const QString &audioMode,
-                                       bool allowFallback) {
+                                       const ProviderRules &rules) {
   const auto match = QRegularExpression(QStringLiteral("^(.+)::ep=(\\d+)$"),
                                          QRegularExpression::CaseInsensitiveOption).match(episodeId);
   if (!match.hasMatch()) {
@@ -921,79 +969,262 @@ void ProviderClient::resolveStreamPage(int generation, const QString &episodeId,
   }
   const auto animeId = match.captured(1);
   const auto episodeNumber = qMax(1, match.captured(2).toInt());
-  const auto normalizedServer = server == QStringLiteral("hd-2") ? QStringLiteral("hd-2") : QStringLiteral("hd-1");
-  const auto mode = normalizedServer == QStringLiteral("hd-1") ? QStringLiteral("ani") : QStringLiteral("mal");
+  const auto requestedServer = server.trimmed().toLower();
+  const auto normalizedServer = supportedServer(requestedServer) ? requestedServer : QStringLiteral("hd-2");
   const auto normalizedAudio = audioMode == QStringLiteral("dub") ? QStringLiteral("dub") : QStringLiteral("sub");
-  const auto streamPage = providerUrl(MegaplayBaseUrl,
-    QStringLiteral("/stream/%1/%2/%3/%4").arg(mode, animeId, QString::number(episodeNumber), normalizedAudio));
-
-  const auto fallback = [this, generation, episodeId, normalizedServer, normalizedAudio, allowFallback](const QString &message) {
-    if (allowFallback) {
-      resolveStreamPage(generation, episodeId,
-                        normalizedServer == QStringLiteral("hd-1") ? QStringLiteral("hd-2") : QStringLiteral("hd-1"),
-                        normalizedAudio, false);
-    } else {
-      emit streamFailed(generation, message);
-    }
+  if (normalizedServer == QStringLiteral("hd-3") || normalizedServer == QStringLiteral("hd-4")) {
+    resolveZokoStream(generation, episodeId, animeId, episodeNumber,
+                      normalizedServer, normalizedAudio, rules);
+    return;
+  }
+  const auto pagePath = rules.pagePath(rules.primaryPagePath, animeId,
+                                       episodeNumber, normalizedAudio);
+  const auto streamPage = providerUrl(rules.primaryBaseUrl, QLatin1Char('/') + pagePath);
+  const auto failed = [this, generation](const QString &message) {
+    emit streamFailed(generation, message);
   };
 
-  getText(streamPage, megaplayHeaders(),
-          [this, generation, episodeId, normalizedServer, normalizedAudio, streamPage, fallback]
+  getText(streamPage, providerHeaders(rules.primaryBaseUrl),
+          [this, generation, episodeId, normalizedServer, normalizedAudio, streamPage, failed, rules]
           (const QByteArray &body, const QUrl &finalUrl) {
     const auto html = QString::fromUtf8(body);
     const auto resolvedPage = finalUrl.isValid() ? finalUrl : streamPage;
-    auto sourceId = capture(html, QStringLiteral("data-id\\s*=\\s*[\\\"']([A-Za-z0-9_-]+)[\\\"']"));
-    if (sourceId.isEmpty())
-      sourceId = capture(html, QStringLiteral("/stream/getSourcesNew\\?id=([A-Za-z0-9_-]+)"));
-    if (sourceId.isEmpty())
-      sourceId = capture(html, QStringLiteral("/stream/getSources\\?id=([A-Za-z0-9_-]+)"));
+    auto sourceReferer = resolvedPage;
+    auto sourceId = capture(html, QStringLiteral("data-(?:id|video-id)\\s*=\\s*[\\\"']\\s*([A-Za-z0-9_-]+)\\s*[\\\"']"));
+    if (sourceId.isEmpty()) {
+      const auto normalizedHtml = QString(html).replace(QStringLiteral("\\/"), QStringLiteral("/"));
+      for (const auto &path : rules.primarySourcesPaths) {
+        sourceId = capture(normalizedHtml, QStringLiteral("/%1\\?%2=([A-Za-z0-9_-]+)")
+          .arg(QRegularExpression::escape(path), QRegularExpression::escape(rules.sourceIdParameter)));
+        if (!sourceId.isEmpty()) break;
+      }
+    }
+    if (sourceId.isEmpty()) {
+      const auto embed = capture(html,
+        QStringLiteral("<iframe[^>]+src=[\\\"']([^\\\"']*/stream/s-\\d+/[A-Za-z0-9_-]+)[\\\"']"));
+      if (!embed.isEmpty()) {
+        sourceReferer = resolvedPage.resolved(QUrl(embed));
+        sourceId = capture(sourceReferer.toString(QUrl::FullyEncoded),
+                           QStringLiteral("/stream/s-\\d+/([A-Za-z0-9_-]+)"));
+      }
+    }
     if (sourceId.isEmpty())
       sourceId = capture(resolvedPage.toString(QUrl::FullyEncoded),
                          QStringLiteral("/stream/s-\\d+/([A-Za-z0-9_-]+)"));
     if (sourceId.isEmpty()) {
-      fallback(QStringLiteral("This server has no stream for the selected episode."));
+      failed(QStringLiteral("This server has no stream for the selected episode."));
       return;
     }
-    // The provider replaced the public JSON adapter with getSourcesNew.  Keep the
-    // old endpoint only as a compatibility fallback for a rolling provider deploy.
-    const auto routes = QStringList{QStringLiteral("/stream/getSourcesNew"),
-                                    QStringLiteral("/stream/getSources")};
+    const auto routes = rules.primarySourcesPaths;
     auto trySources = std::make_shared<std::function<void(int)>>();
     *trySources = [this, generation, episodeId, normalizedServer, normalizedAudio,
-                   resolvedPage, sourceId, fallback, routes, trySources](int index) {
-      const auto sourcesUrl = providerUrl(MegaplayBaseUrl, routes.at(index),
-                                           {{QStringLiteral("id"), sourceId}});
-      auto headers = megaplayHeaders(resolvedPage);
+                   sourceReferer, sourceId, failed, routes, trySources, rules](int index) {
+      const auto sourcesUrl = providerUrl(rules.primaryBaseUrl,
+                                           QLatin1Char('/') + routes.at(index),
+                                           {{rules.sourceIdParameter, sourceId}});
+      auto headers = providerHeaders(rules.primaryBaseUrl, sourceReferer);
       headers.append({QByteArrayLiteral("X-Requested-With"), QByteArrayLiteral("XMLHttpRequest")});
       headers.append({QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain,*/*")});
       getText(sourcesUrl, headers,
-              [this, generation, episodeId, normalizedServer, normalizedAudio, fallback,
-               routes, trySources, index](const QByteArray &json, const QUrl &) {
+              [this, generation, episodeId, normalizedServer, normalizedAudio, failed,
+               sourceReferer, routes, trySources, index, rules](const QByteArray &json, const QUrl &) {
         const auto document = QJsonDocument::fromJson(json);
         if (!document.isObject()) {
           if (index + 1 < routes.size()) { (*trySources)(index + 1); return; }
-          fallback(QStringLiteral("The stream provider returned invalid data."));
+          failed(QStringLiteral("The stream provider returned invalid data."));
           return;
         }
         auto root = document.object();
         if (root.value(QStringLiteral("data")).isObject()) root = root.value(QStringLiteral("data")).toObject();
+        const auto directUrl = providerSource(root.value(rules.sourcesField),
+                                              rules.sourceFileField);
+        if (directUrl.isEmpty() && root.value(QStringLiteral("enc")).isString()) {
+          const auto decrypted = ProviderCrypto::decodeEncryptedFile(
+            root.value(QStringLiteral("enc")).toString(), rules.primaryCipherKey,
+            rules.primaryCipherIv);
+          const auto signedUrl = ProviderCrypto::signMediaUrl(
+            decrypted, rules.primaryTokenKey, QDateTime::currentSecsSinceEpoch(),
+            rules.primaryTokenLifetimeSeconds);
+          if (!signedUrl.isEmpty()) {
+            root.insert(rules.sourcesField, signedUrl);
+            root.insert(QStringLiteral("tokenSigningKey"), QString::fromUtf8(rules.primaryTokenKey));
+            root.insert(QStringLiteral("tokenLifetimeSeconds"), rules.primaryTokenLifetimeSeconds);
+            root.insert(QStringLiteral("tokenRefreshLeadSeconds"), rules.primaryTokenRefreshLeadSeconds);
+          }
+        } else if (!directUrl.isEmpty() &&
+                   (rules.sourcesField != QStringLiteral("sources") ||
+                    rules.sourceFileField != QStringLiteral("file"))) {
+          root.insert(QStringLiteral("sources"), directUrl);
+        }
+        if (rules.tracksField != QStringLiteral("tracks") && root.contains(rules.tracksField))
+          root.insert(QStringLiteral("tracks"), root.value(rules.tracksField));
         root.insert(QStringLiteral("server"), normalizedServer);
-        root.insert(QStringLiteral("referer"), QStringLiteral("https://megaplay.buzz/"));
-        root.insert(QStringLiteral("origin"), QStringLiteral("https://megaplay.buzz"));
+        // MegaPlay's media CDN checks the player origin, while the JSON source
+        // endpoint above expects the concrete player page as its Referer.
+        QUrl mediaReferer;
+        mediaReferer.setScheme(sourceReferer.scheme());
+        mediaReferer.setHost(sourceReferer.host());
+        mediaReferer.setPort(sourceReferer.port());
+        mediaReferer.setPath(QStringLiteral("/"));
+        root.insert(QStringLiteral("referer"), mediaReferer.toString(QUrl::FullyEncoded));
+        root.insert(QStringLiteral("origin"), rules.primaryBaseUrl);
+        QJsonObject mediaHeaders;
+        for (auto it = rules.primaryMediaHeaders.cbegin(); it != rules.primaryMediaHeaders.cend(); ++it)
+          mediaHeaders.insert(it.key(), it.value());
+        root.insert(QStringLiteral("headers"), mediaHeaders);
         const auto stream = streamMap(root, episodeId, normalizedServer, normalizedAudio);
         if (!stream.value(QStringLiteral("mediaUrl")).toString().isEmpty()) {
           emit streamResolved(generation, stream);
           return;
         }
         if (index + 1 < routes.size()) { (*trySources)(index + 1); return; }
-        fallback(QStringLiteral("This server did not return a playable stream."));
-      }, [fallback, routes, trySources, index](const QString &message) {
+        failed(QStringLiteral("This server did not return a playable stream."));
+      }, [failed, routes, trySources, index](const QString &message) {
         if (index + 1 < routes.size()) { (*trySources)(index + 1); return; }
-        fallback(message);
+        failed(message);
       });
     };
     (*trySources)(0);
-  }, fallback);
+  }, failed);
+}
+
+void ProviderClient::resolveAniListId(const QString &malId,
+                                      std::function<void(const QString &)> completed) {
+  if (m_anilistIds.contains(malId)) { completed(m_anilistIds.value(malId)); return; }
+  if (!QRegularExpression(QStringLiteral("^[0-9]+$")).match(malId).hasMatch()) {
+    completed({}); return;
+  }
+  QNetworkRequest request{QUrl(AniListGraphqlUrl)};
+  request.setTransferTimeout(8'000);
+  request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                       QNetworkRequest::NoLessSafeRedirectPolicy);
+  request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+  request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json"));
+  const QJsonObject body{{QStringLiteral("query"),
+    QStringLiteral("{ Media(idMal: %1, type: ANIME) { id } }").arg(malId)}};
+  auto *reply = m_network.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+  connect(reply, &QNetworkReply::finished, this,
+          [this, reply, malId, completed = std::move(completed)] {
+    QString result;
+    if (reply->error() == QNetworkReply::NoError) {
+      const auto root = QJsonDocument::fromJson(reply->readAll()).object();
+      const auto media = root.value(QStringLiteral("data")).toObject()
+                         .value(QStringLiteral("Media")).toObject();
+      const auto id = media.value(QStringLiteral("id")).toInt();
+      if (id > 0) {
+        result = QString::number(id);
+        m_anilistIds.insert(malId, result);
+      }
+    }
+    reply->deleteLater();
+    completed(result);
+  });
+}
+
+void ProviderClient::resolveZokoStream(int generation, const QString &episodeId,
+                                       const QString &animeId, int episodeNumber,
+                                       const QString &server, const QString &audioMode,
+                                       const ProviderRules &rules) {
+  const auto pageFor = [episodeNumber, audioMode, rules](const QString &catalog,
+                                                         const QString &id) {
+    const auto path = rules.pagePath(rules.secondaryPagePath, id, episodeNumber,
+                                     audioMode, catalog);
+    return providerUrl(rules.secondaryBaseUrl, QLatin1Char('/') + path);
+  };
+  const auto finalFailure = [this, generation](const QString &) {
+    emit streamFailed(generation,
+      QStringLiteral("This server has no playable source for this episode and audio mode."));
+  };
+  if (server == QStringLiteral("hd-4")) {
+    resolveZokoStreamPage(generation, episodeId, pageFor(QStringLiteral("mal"), animeId),
+                          server, audioMode, rules,
+      [this, generation, episodeId, animeId, server, audioMode, pageFor, finalFailure, rules](const QString &) {
+        resolveAniListId(animeId,
+          [this, generation, episodeId, server, audioMode, pageFor, finalFailure, rules](const QString &anilistId) {
+            if (anilistId.isEmpty()) { finalFailure({}); return; }
+            resolveZokoStreamPage(generation, episodeId,
+                                  pageFor(QStringLiteral("ani"), anilistId),
+                                  server, audioMode, rules, finalFailure);
+          });
+      });
+    return;
+  }
+  resolveAniListId(animeId,
+    [this, generation, episodeId, animeId, server, audioMode, pageFor, finalFailure, rules](const QString &anilistId) {
+      const auto tryMal = [this, generation, episodeId, animeId, server, audioMode,
+                           pageFor, finalFailure, rules] {
+        resolveZokoStreamPage(generation, episodeId,
+                              pageFor(QStringLiteral("mal"), animeId),
+                              server, audioMode, rules, finalFailure);
+      };
+      if (anilistId.isEmpty()) { tryMal(); return; }
+      resolveZokoStreamPage(generation, episodeId,
+                            pageFor(QStringLiteral("ani"), anilistId),
+                            server, audioMode, rules,
+                            [tryMal](const QString &) { tryMal(); });
+    });
+}
+
+void ProviderClient::resolveZokoStreamPage(int generation, const QString &episodeId,
+                                           const QUrl &pageUrl, const QString &server,
+                                           const QString &audioMode,
+                                           const ProviderRules &rules,
+                                           std::function<void(const QString &)> failure) {
+  const auto emitPayload = [this, generation, episodeId, server, audioMode, rules]
+                           (QJsonObject root) {
+    auto data = root.value(QStringLiteral("data")).isObject()
+      ? root.value(QStringLiteral("data")).toObject() : root;
+    const auto mediaUrl = providerSource(data.value(rules.sourcesField), rules.sourceFileField);
+    if (!mediaUrl.isEmpty() && (rules.sourcesField != QStringLiteral("sources") ||
+                                rules.sourceFileField != QStringLiteral("file")))
+      data.insert(QStringLiteral("sources"), mediaUrl);
+    if (rules.tracksField != QStringLiteral("tracks") && data.contains(rules.tracksField))
+      data.insert(QStringLiteral("tracks"), data.value(rules.tracksField));
+    data.insert(QStringLiteral("server"), server);
+    data.insert(QStringLiteral("referer"), rules.secondaryBaseUrl + QLatin1Char('/'));
+    data.insert(QStringLiteral("origin"), rules.secondaryBaseUrl);
+    QJsonObject headers;
+    for (auto it = rules.secondaryMediaHeaders.cbegin(); it != rules.secondaryMediaHeaders.cend(); ++it)
+      headers.insert(it.key(), it.value());
+    data.insert(QStringLiteral("headers"), headers);
+    const auto stream = streamMap(data, episodeId, server, audioMode);
+    if (stream.value(QStringLiteral("mediaUrl")).toString().isEmpty()) return false;
+    emit streamResolved(generation, stream);
+    return true;
+  };
+
+  getText(pageUrl, providerHeaders(rules.secondaryBaseUrl),
+    [this, pageUrl, failure, emitPayload, rules](const QByteArray &body, const QUrl &) {
+      const auto page = QString::fromUtf8(body);
+      const auto config = decodeZokoConfig(page, rules.secondaryPayloadKey);
+      if (!config.isEmpty() && emitPayload(config)) return;
+      const auto direct = QJsonDocument::fromJson(body);
+      if (direct.isObject() && emitPayload(direct.object())) return;
+
+      auto normalized = page;
+      normalized.replace(QStringLiteral("\\/"), QStringLiteral("/"));
+      QString sourceId;
+      for (const auto &pattern : {
+             QStringLiteral("data-id\\s*=\\s*[\\\"']\\s*([A-Za-z0-9_-]+)\\s*[\\\"']"),
+             QStringLiteral("(?:stream/)?getSources[^\\\"']*[?&]id=([A-Za-z0-9_-]+)"),
+             QStringLiteral("[\\\"'](?:sourceId|source_id|episodeId|episode_id)[\\\"']\\s*:\\s*[\\\"']([A-Za-z0-9_-]+)[\\\"']")}) {
+        sourceId = capture(normalized, pattern);
+        if (!sourceId.isEmpty()) break;
+      }
+      if (sourceId.isEmpty()) { failure(QStringLiteral("The secondary provider returned no source.")); return; }
+      const auto sourceUrl = providerUrl(rules.secondaryBaseUrl,
+        QLatin1Char('/') + rules.secondarySourcesPath,
+        {{rules.sourceIdParameter, sourceId}});
+      auto headers = providerHeaders(rules.secondaryBaseUrl, pageUrl);
+      headers.append({QByteArrayLiteral("X-Requested-With"), QByteArrayLiteral("XMLHttpRequest")});
+      headers.append({QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain,*/*")});
+      getText(sourceUrl, headers,
+        [failure, emitPayload](const QByteArray &sourceBody, const QUrl &) {
+          const auto document = QJsonDocument::fromJson(sourceBody);
+          if (!document.isObject() || !emitPayload(document.object()))
+            failure(QStringLiteral("The secondary provider returned invalid stream data."));
+        }, failure, false, false);
+    }, failure, false, false);
 }
 
 AccountClient::AccountClient(SecureStore *secureStore, Database *database, QObject *parent)

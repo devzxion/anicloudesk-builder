@@ -210,6 +210,31 @@ private slots:
     QVERIFY(player.readAll().contains("m_server = QStringLiteral(\"hd-2\")"));
   }
 
+  void exposesFourIndependentServersAndPreservesSwitchPosition() {
+    QFile player(QStringLiteral(ANICLOUD_SOURCE_DIR "/src/PlayerController.cpp")); QVERIFY(player.open(QIODevice::ReadOnly));
+    QFile profile(QStringLiteral(ANICLOUD_SOURCE_DIR "/qml/pages/ProfilePage.qml")); QVERIFY(profile.open(QIODevice::ReadOnly));
+    QFile controls(QStringLiteral(ANICLOUD_SOURCE_DIR "/qml/pages/PlayerPage.qml")); QVERIFY(controls.open(QIODevice::ReadOnly));
+    const auto source = player.readAll();
+    QVERIFY(source.contains("m_restorePosition = position()"));
+    QVERIFY(source.contains("providerFallbackOrder"));
+    QVERIFY(source.contains("m_captionFallbackGeneration"));
+    const auto profileSource = profile.readAll();
+    QVERIFY(profileSource.contains("\"HD3\""));
+    QVERIFY(profileSource.contains("\"HD4\""));
+    const auto controlsSource = controls.readAll();
+    QVERIFY(controlsSource.contains("nextServer"));
+    QVERIFY(controlsSource.contains("Player.switchAudio"));
+  }
+
+  void dubDownloadsPreserveSubPageCaptions() {
+    QFile downloads(QStringLiteral(ANICLOUD_SOURCE_DIR "/src/DownloadManager.cpp")); QVERIFY(downloads.open(QIODevice::ReadOnly));
+    const auto source = downloads.readAll();
+    QVERIFY(source.contains("m_pendingCaptionStreams"));
+    QVERIFY(source.contains("QStringLiteral(\"dub\")"));
+    QVERIFY(source.contains("QStringLiteral(\"sub\")"));
+    QVERIFY(source.contains("resolved.insert(QStringLiteral(\"subtitles\"), captions)"));
+  }
+
   void paletteIsCanonical() {
     QFile theme(QStringLiteral(ANICLOUD_SOURCE_DIR "/qml/Theme.qml")); QVERIFY(theme.open(QIODevice::ReadOnly));
     const auto source = theme.readAll(); QVERIFY(source.contains("#E50914")); QVERIFY(source.contains("#B20710")); QVERIFY(source.contains("#09090B"));

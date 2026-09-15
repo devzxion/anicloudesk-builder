@@ -134,7 +134,7 @@ private slots:
     QVERIFY(captions.body.startsWith("WEBVTT"));
   }
 
-  void assignsTransportStreamSuffixToDisguisedSegments() {
+  void preservesUnusualSegmentSuffixes() {
     HlsGateway gateway;
     const auto local = QUrl(gateway.openSession({
       {QStringLiteral("mediaUrl"), upstreamUrl(QStringLiteral("/fake-extension.m3u8")).toString()},
@@ -143,7 +143,7 @@ private slots:
     QCOMPARE(manifest.status, 200);
     const QUrl segmentUrl(QString::fromUtf8(manifest.body.split('\n').last().trimmed()));
     QVERIFY(segmentUrl.isValid());
-    QVERIFY(segmentUrl.path().endsWith(QStringLiteral(".ts")));
+    QVERIFY(segmentUrl.path().endsWith(QStringLiteral(".jpg")));
     const auto segment = request(segmentUrl);
     QCOMPARE(segment.status, 200);
     QCOMPARE(segment.body, QByteArrayLiteral("FAKE-TS"));
@@ -177,7 +177,7 @@ private slots:
     const auto media = request(mediaUrl);
     QCOMPARE(media.status, 200);
     const QUrl segmentUrl(QString::fromUtf8(media.body.split('\n').at(3).trimmed()));
-    QVERIFY(segmentUrl.path().endsWith(QStringLiteral(".ts")));
+    QVERIFY(segmentUrl.path().endsWith(QStringLiteral(".jpg")));
     QVERIFY(!media.body.contains("file:"));
     QVERIFY(!media.body.contains("provider-disguised.jpg"));
 

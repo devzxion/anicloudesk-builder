@@ -41,6 +41,9 @@ private:
     QHash<QString, QString> identifiers;
     QString rootResourceId;
     QString localRoot;
+    QByteArray tokenSigningKey;
+    int tokenLifetimeSeconds = 90;
+    int tokenRefreshLeadSeconds = 30;
     QDateTime expiresAt;
   };
 

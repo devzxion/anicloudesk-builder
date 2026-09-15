@@ -1,0 +1,6 @@
+{
+  "sources": [{"file": "https://media.example/plain/master.m3u8", "label": "Auto"}],
+  "tracks": [{"file": "https://media.example/plain/en.vtt", "kind": "captions", "label": "English"}],
+  "intro": {"start": 3, "end": 83},
+  "outro": {"start": 1290, "end": 1350}
+}

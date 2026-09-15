@@ -1,12 +1,15 @@
 #pragma once
 
 #include <QJsonObject>
+#include <QHash>
 #include <QNetworkAccessManager>
 #include <QObject>
 #include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 #include <functional>
+
+#include "ProviderPatchManager.h"
 
 class Database;
 class SecureStore;
@@ -93,7 +96,16 @@ private:
                TextSuccess success, std::function<void(const QString &)> failure = {},
                bool reportError = true, bool trackLoading = true);
   void resolveStreamPage(int generation, const QString &episodeId, const QString &server,
-                         const QString &audioMode, bool allowFallback);
+                         const QString &audioMode, const ProviderRules &rules);
+  void resolveZokoStream(int generation, const QString &episodeId, const QString &animeId,
+                         int episodeNumber, const QString &server, const QString &audioMode,
+                         const ProviderRules &rules);
+  void resolveZokoStreamPage(int generation, const QString &episodeId, const QUrl &pageUrl,
+                             const QString &server, const QString &audioMode,
+                             const ProviderRules &rules,
+                             std::function<void(const QString &)> failure);
+  void resolveAniListId(const QString &malId,
+                        std::function<void(const QString &)> completed);
   void applyEpisodes(const QString &animeId, int episodeCount);
   void loadEpisodeTitlesPage(const QString &animeId, const QUrl &episodeUrl,
                              int offset, int episodeCount);
@@ -102,6 +114,8 @@ private:
   static QJsonObject payload(const QJsonObject &root);
 
   QNetworkAccessManager m_network;
+  ProviderPatchManager m_patches;
+  QHash<QString, QString> m_anilistIds;
   int m_pending = 0;
   QString m_error;
   QVariantList m_spotlight;

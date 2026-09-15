@@ -30,7 +30,9 @@ public:
   [[nodiscard]] QString error() const { return m_error; }
   [[nodiscard]] QString storageRoot() const { return m_storageRoot; }
   [[nodiscard]] bool movingStorage() const { return m_movingStorage; }
-  [[nodiscard]] bool preparing() const { return !m_pendingEpisodes.isEmpty(); }
+  [[nodiscard]] bool preparing() const {
+    return !m_pendingEpisodes.isEmpty() || !m_pendingCaptionStreams.isEmpty();
+  }
 
   Q_INVOKABLE void reload();
   Q_INVOKABLE QString enqueue(const QVariantMap &episode, const QVariantMap &stream, int preferredHeight = 1080);
@@ -85,4 +87,5 @@ private:
   bool m_movingStorage = false;
   int m_resolveGeneration = 100000;
   QHash<int, QVariantMap> m_pendingEpisodes;
+  QHash<int, QVariantMap> m_pendingCaptionStreams;
 };

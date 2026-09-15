@@ -1,0 +1,6 @@
+{
+  "enc": "wdeBruh3qqn_i5wUNnyaPUUiUrCl4NX9DgvbKVw525M3wGI-yTEpI8jN4bOD63nqZ_g55p0NsTcTLuf--GDa52pjWNYMxZ22W4g1eT-fefucfxvPALjvHhgvYa67YAZRuH8xSgaFEXWVhrALy-7JwQ",
+  "tracks": [{"file": "https://media.example/encrypted/en.vtt", "kind": "captions", "label": "English"}],
+  "intro": {"start": 5, "end": 90},
+  "outro": {"start": 1300, "end": 1360}
+}

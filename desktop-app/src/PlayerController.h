@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QSet>
+#include <QStringList>
 #include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
@@ -153,6 +154,7 @@ private:
   int m_restoreCaptionIndex = -1;
   int m_selectedCaptionIndex = -1;
   int m_captionGeneration = 0;
+  int m_captionFallbackGeneration = 0;
   bool m_captionsEnabled = true;
   QList<QUrl> m_captionQueue;
   QSet<QString> m_captionVisited;
@@ -165,7 +167,8 @@ private:
   int m_generation = 0;
   int m_alternateIndex = -1;
   int m_bufferRetries = 0;
-  bool m_triedSecondaryServer = false;
+  QStringList m_serverFallbackOrder;
+  int m_serverFallbackIndex = 0;
   bool m_offlinePlayback = false;
   bool m_failureScheduled = false;
   QString m_pendingFailure;

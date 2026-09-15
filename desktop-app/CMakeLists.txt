@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(AniCloudDesktop VERSION 4.1.5 LANGUAGES CXX)
+project(AniCloudDesktop VERSION 4.1.6 LANGUAGES CXX)
 
 if(WIN32)
   enable_language(RC)
@@ -20,6 +20,7 @@ find_package(Qt6 6.10 REQUIRED COMPONENTS
   Core Gui Qml Quick QuickControls2 Network Sql Multimedia Concurrent Widgets Test QuickTest
 )
 find_package(unofficial-sodium CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 FetchContent_Declare(
   extra_cmake_modules
@@ -61,6 +62,9 @@ set_source_files_properties(qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 set(ANICLOUD_ACCOUNT_API_BASE_URL "https://api.anicloud.ink/public/api/v1" CACHE STRING "AniCloud account API")
 set(ANICLOUD_RELEASE_REPOSITORY "devz-on/anicloudesk" CACHE STRING "GitHub release repository")
 set(ANICLOUD_UPDATE_PUBLIC_KEY_HEX "" CACHE STRING "Ed25519 public key used to verify desktop release manifests")
+set(ANICLOUD_VERSION_CODE 40106 CACHE STRING "Monotonic desktop provider-patch version code")
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/config/provider-patch-public-key.txt" ANICLOUD_PROVIDER_PATCH_PUBLIC_KEY_BASE64)
+string(STRIP "${ANICLOUD_PROVIDER_PATCH_PUBLIC_KEY_BASE64}" ANICLOUD_PROVIDER_PATCH_PUBLIC_KEY_BASE64)
 if(CMAKE_BUILD_TYPE STREQUAL "Release" AND ANICLOUD_UPDATE_PUBLIC_KEY_HEX STREQUAL "")
   message(FATAL_ERROR "Release builds require ANICLOUD_UPDATE_PUBLIC_KEY_HEX")
 endif()
@@ -76,6 +80,12 @@ qt_add_executable(AniCloud WIN32 MACOSX_BUNDLE
   src/Database.cpp
   src/ApiClient.h
   src/ApiClient.cpp
+  src/ProviderCrypto.h
+  src/ProviderCrypto.cpp
+  src/ProviderRules.h
+  src/ProviderRules.cpp
+  src/ProviderPatchManager.h
+  src/ProviderPatchManager.cpp
   src/HlsTools.h
   src/HlsTools.cpp
   src/HlsGateway.h
@@ -165,6 +175,7 @@ target_link_libraries(AniCloud PRIVATE
   Qt6::Concurrent
   Qt6::Widgets
   unofficial-sodium::sodium
+  OpenSSL::Crypto
   ${ANICLOUD_QTKEYCHAIN_TARGET}
 )
 

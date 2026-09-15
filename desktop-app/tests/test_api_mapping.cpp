@@ -1,11 +1,26 @@
 #include "ApiClient.h"
 
+#include <QFile>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QTest>
 
 class ApiMappingTest final : public QObject {
   Q_OBJECT
 private slots:
+  void mapsSanitizedPlainProviderFixture() {
+    QFile fixture(QStringLiteral(ANICLOUD_FIXTURE_DIR "/provider_plain.json"));
+    QVERIFY(fixture.open(QIODevice::ReadOnly));
+    const auto root = QJsonDocument::fromJson(fixture.readAll()).object();
+    const auto stream = ProviderClient::streamMap(root, QStringLiteral("21::ep=1"),
+                                                   QStringLiteral("hd-1"), QStringLiteral("sub"));
+    QCOMPARE(stream.value(QStringLiteral("mediaUrl")).toString(),
+             QStringLiteral("https://media.example/plain/master.m3u8"));
+    QCOMPARE(stream.value(QStringLiteral("subtitles")).toList().size(), 1);
+    QCOMPARE(stream.value(QStringLiteral("introEnd")).toInt(), 83);
+    QCOMPARE(stream.value(QStringLiteral("outroStart")).toInt(), 1290);
+  }
+
   void mapsLegacyAndCurrentCards() {
     const QJsonArray source{
       QJsonObject{{QStringLiteral("id"), QStringLiteral("one")}, {QStringLiteral("name"), QStringLiteral("First")}, {QStringLiteral("image"), QStringLiteral("poster")}, {QStringLiteral("episodes"), QJsonObject{{QStringLiteral("sub"), 12}, {QStringLiteral("dub"), 4}}}},
@@ -76,6 +91,24 @@ private slots:
     QCOMPARE(stream.value(QStringLiteral("introEnd")).toInt(), 85);
     QCOMPARE(stream.value(QStringLiteral("outroStart")).toInt(), 1300);
     QCOMPARE(stream.value(QStringLiteral("headers")).toMap().value(QStringLiteral("Origin")).toString(), QStringLiteral("https://megaplay.buzz"));
+  }
+
+  void signedRuleHeadersOverrideProviderDefaults() {
+    const QJsonObject root{
+      {QStringLiteral("sources"), QStringLiteral("https://cdn.example/current/master.m3u8")},
+      {QStringLiteral("referer"), QStringLiteral("https://embed.example/")},
+      {QStringLiteral("origin"), QStringLiteral("https://embed.example")},
+      {QStringLiteral("headers"), QJsonObject{
+        {QStringLiteral("Referer"), QStringLiteral("https://rotated.example/")},
+        {QStringLiteral("Origin"), QStringLiteral("https://rotated.example")},
+        {QStringLiteral("User-Agent"), QStringLiteral("Provider-UA")},
+      }},
+    };
+    const auto headers = ProviderClient::streamMap(root, QStringLiteral("episode"),
+      QStringLiteral("hd-1"), QStringLiteral("sub")).value(QStringLiteral("headers")).toMap();
+    QCOMPARE(headers.value(QStringLiteral("Referer")).toString(), QStringLiteral("https://rotated.example/"));
+    QCOMPARE(headers.value(QStringLiteral("Origin")).toString(), QStringLiteral("https://rotated.example"));
+    QCOMPARE(headers.value(QStringLiteral("User-Agent")).toString(), QStringLiteral("Provider-UA"));
   }
 
   void parsesBundledCatalogPagesWithoutAccountApi() {

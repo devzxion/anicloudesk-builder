@@ -5,6 +5,7 @@ AniCloud Desktop is built with dynamically deployed Qt libraries and the Qt Mult
 - Qt 6.11.1 — Copyright The Qt Company and contributors; LGPL-3.0-only/GPL/commercial multi-license. Source and terms: https://www.qt.io/licensing
 - FFmpeg as deployed by Qt Multimedia — LGPL-2.1-or-later or GPL depending on the distributed build configuration. Source and terms: https://ffmpeg.org/legal.html
 - libsodium 1.0.22 — ISC license. Source: https://github.com/jedisct1/libsodium
+- OpenSSL 3.x — Apache License 2.0. Source: https://www.openssl.org/source/
 - QtKeychain 0.17.0 — BSD-3-Clause license. Source: https://github.com/frankosterfeld/qtkeychain
 
 The production packaging workflow installs this notice beside the application. No browser engine or website bundle is distributed.

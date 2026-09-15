@@ -1,6 +1,7 @@
 #include "HlsGateway.h"
 
 #include "HlsTools.h"
+#include "ProviderCrypto.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -101,6 +102,9 @@ QString HlsGateway::openSession(const QVariantMap &stream) {
   Session session;
   session.headers = stream.value(QStringLiteral("headers")).toMap();
   session.subtitles = stream.value(QStringLiteral("subtitles")).toList();
+  session.tokenSigningKey = stream.value(QStringLiteral("tokenSigningKey")).toString().toUtf8();
+  session.tokenLifetimeSeconds = stream.value(QStringLiteral("tokenLifetimeSeconds"), 90).toInt();
+  session.tokenRefreshLeadSeconds = stream.value(QStringLiteral("tokenRefreshLeadSeconds"), 30).toInt();
   const auto referer = stream.value(QStringLiteral("referer")).toString();
   if (!referer.isEmpty()) session.headers.insert(QStringLiteral("Referer"), referer);
   session.expiresAt = QDateTime::currentDateTimeUtc().addSecs(SessionLifetimeMinutes * 60);
@@ -312,7 +316,10 @@ void HlsGateway::proxyResolved(QTcpSocket *socket, const QByteArray &method, con
   if (it == m_sessions.end()) { sendError(socket, 410, QByteArrayLiteral("Gone")); return; }
   const auto upstream = it->resources.value(resourceId);
   if (!upstream.isValid()) { sendError(socket, 404, QByteArrayLiteral("Not Found")); return; }
-  auto routedUrl = upstream;
+  auto routedUrl = QUrl(ProviderCrypto::refreshSignedUrl(
+    upstream.toString(QUrl::FullyEncoded), it->tokenSigningKey,
+    QDateTime::currentSecsSinceEpoch(), it->tokenLifetimeSeconds,
+    it->tokenRefreshLeadSeconds));
   if (!publicAddress.isEmpty()) routedUrl.setHost(publicAddress);
   QNetworkRequest request(routedUrl);
   request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);

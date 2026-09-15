@@ -59,6 +59,14 @@ Rectangle {
         const seconds = String(total % 60).padStart(2, "0")
         return hours > 0 ? hours + ":" + String(minutes).padStart(2, "0") + ":" + seconds : minutes + ":" + seconds
     }
+    function serverLabel(server) {
+        return String(server || "hd-2").toUpperCase().replace("-", "")
+    }
+    function nextServer(server) {
+        const choices = ["hd-2", "hd-1", "hd-3", "hd-4"]
+        const index = choices.indexOf(server)
+        return choices[(index + 1) % choices.length]
+    }
 
     VideoOutput {
         id: videoOutput
@@ -265,8 +273,8 @@ Rectangle {
                 }
                 AppButton {
                     visible: !root.compact; compact: true; secondary: true
-                    text: Player.current.server === "hd-2" ? "HD2" : "HD1"
-                    onClicked: Player.switchServer(Player.current.server === "hd-2" ? "hd-1" : "hd-2")
+                    text: root.serverLabel(Player.current.server)
+                    onClicked: Player.switchServer(root.nextServer(Player.current.server))
                 }
                 PlayerIconButton { iconName: "settings"; tooltip: "Playback settings"; onClicked: { root.revealControls(); settingsPopup.open() } }
                 PlayerIconButton { iconName: "lock"; tooltip: "Lock player controls"; onClicked: root.lockPlayerUi() }
@@ -456,7 +464,7 @@ Rectangle {
             RowLayout {
                 visible: root.compact; Layout.fillWidth: true
                 AppButton { Layout.fillWidth: true; text: String(Player.current.audioMode || "sub").toUpperCase(); secondary: true; compact: true; onClicked: Player.switchAudio(Player.current.audioMode === "dub" ? "sub" : "dub") }
-                AppButton { Layout.fillWidth: true; text: Player.current.server === "hd-2" ? "HD2" : "HD1"; secondary: true; compact: true; onClicked: Player.switchServer(Player.current.server === "hd-2" ? "hd-1" : "hd-2") }
+                AppButton { Layout.fillWidth: true; text: root.serverLabel(Player.current.server); secondary: true; compact: true; onClicked: Player.switchServer(root.nextServer(Player.current.server)) }
             }
         }
     }
